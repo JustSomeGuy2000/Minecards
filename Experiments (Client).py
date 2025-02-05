@@ -1,8 +1,14 @@
 import socket
-import selectors
+import select
 
 HOST = "127.0.0.1"  # The server's hostname or IP address
 PORT = 65432  # The port used by the server
+
+'''
+Steps to make client socket:
+1. Make socket object: s=socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+2. Connect to host (blocks until connected or failed): s.connect((HOST, PORT))
+'''
 
 s= socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 s.connect((HOST, PORT))
