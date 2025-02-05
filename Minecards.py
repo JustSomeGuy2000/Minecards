@@ -1,5 +1,6 @@
 from pygame import *
 import random as r
+import time as t
 import socket
 import select
 #Name:LAPTOP-20C14P7N, Address:172.20.57.66
@@ -200,6 +201,7 @@ while running:
                 try:
                     sock.connect((HOST,PORT))
                     state="pregame" #await info to build player2
+                    print("Connection successful")
                 except:
                     markers["retry"]=True
         elif e.type==KEYDOWN:
@@ -225,14 +227,12 @@ while running:
             HOST="127.0.0.1"
             sock.bind((HOST,PORT))
             sock.listen()
-            read_ready, write_ready, error_ready=select.select([sock],[sock],[],0)
-            #try:
-            if sock in read_ready:
+            try: #figure out how to unblock
                 sock, addr= sock.accept()
                 print(f"Accepted connection at {addr}")
                 state="pregame"
-            #except:
-                #pass
+            except:
+                pass
         elif connect_state == "connecting":
             sock= socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -246,7 +246,9 @@ while running:
     elif state == "pregame":
         screen.blit(pregame_text,(window_dim[0]/2-font.size("Loading...")[0]/2,window_dim[1]/2))
         if sock in read_ready:
+            t.sleep(1)
             player2name=sock.recv(4096).decode()
+            print(f"Opp. name: {player2name}")
             player2=Player(player2name,2,None,None)
             state="game"
         if sock in write_ready:
