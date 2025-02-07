@@ -47,26 +47,26 @@ class Mob(sprite.Sprite):
             self.rect.x+=self.velocity[0]
             self.rect.y+=self.velocity[1]
             self.timer-=1
-        screen.blit(self.image, (self.rect.x,self.rect.y))
+        screen.blit(self.current_sprite, (self.rect.x,self.rect.y))
 
-    def switch_sprite(self):
-        if self.current_sprite==self.front_sprite:
-            self.current_sprite=self.back_sprite
-            self.rect=self.current_sprite.get_rect()
-
-        elif self.current_sprite==self.back_sprite:
+    def switch_sprite(self,final):
+        if final == "front":
             self.current_sprite=self.front_sprite
-            self.rect=self.current_sprite.get_rect()
+        elif final == "back":
+            self.current_sprite=self.back_sprite
+        elif final== "cut":
+            self.current_sprite=self.cut_sprite
+        self.rect=self.current_sprite.get_rect()
 
 class Item(sprite.Sprite):
-    def __init__(self,name,cost,effect,sprite,init_pos,cut_sprite,border):
+    def __init__(self,name,cost,effect,sprite,init_pos,cut_sprite,border,dimensions):
         #ITEM INFO
         self.name=name
         self.cost=cost
         self.effect=effect #a function that takes in a value and changes it appropriately
         self.border=border
         #SPRITE AND COORDS
-        self.front_sprite=transform.scale(image.load(sprite),card_dim)
+        self.front_sprite=transform.scale(image.load(sprite),dimensions)
         self.cut_sprite=transform.scale(image.load(cut_sprite),item_dim)
         self.back_sprite=transform.scale(image.load(cardback),card_dim)
         self.current_sprite=self.front_sprite
@@ -83,35 +83,46 @@ class Item(sprite.Sprite):
             self.timer=time
             self.velocity=((dest[0]-self.rect.x)/time, (dest[1]-self.rect.y)/time)
 
-    def update(self, screen):
+    def update(self):
         if self.timer!=0:
             self.rect.x+=self.velocity[0]
             self.rect.y+=self.velocity[1]
             self.timer-=1
-        screen.blit(self.image, (self.rect.x,self.rect.y))
+        screen.blit(self.current_sprite, (self.rect.x,self.rect.y))
 
-    def switch_sprite(self):
-        if self.current_sprite==self.front_sprite:
-            self.current_sprite=self.back_sprite
-            self.rect=self.current_sprite.get_rect()
-
-        elif self.current_sprite==self.back_sprite:
+    def switch_sprite(self, final):
+        if final == "front":
             self.current_sprite=self.front_sprite
-            self.rect=self.current_sprite.get_rect()
+        elif final == "back":
+            self.current_sprite=self.back_sprite
+        elif final== "cut":
+            self.current_sprite=self.cut_sprite
+        self.rect=self.current_sprite.get_rect()
+
 
 class Player():
-    def __init__(self,name,player_number,hand_pos,units_pos):
+    def __init__(self,name,player_number,hand_pos,field_pos):
         self.name=name
         self.player_number=player_number
         self.hand=[]
-        self.field={1:None, 2:None, 3:None}
+        self.field={1:elder, 2:elder, 3:elder}
         self.souls=0
         self.hand_pos=hand_pos
-        self.units_pos=units_pos
+        self.field_pos=field_pos
 
     def update(self):
         for card in self.hand:
             card.update()
+            #display cards
+        for card in self.field:
+            if self.field[card] != None:
+                self.field[card].update()
+
+    def add_to_field(self,card,pos): #card is index number of hand card to take, pos is field position to take
+        target=self.hand.pop(card)
+        self.field[pos]=target
+        target.switch_sprite("cut")
+        target.rect.x, target.rect.y=self.field_pos[pos-1]
 
 class ClickableText():
     def __init__(self,font,text,colour,position):
@@ -121,20 +132,22 @@ class ClickableText():
         self.textrect.x=position[0]
         self.textrect.y=position[1]
 
-def deckbuilder():
-    deck=[]
-    deckname=[]
-    for card in decklist:
-        for i in range(decklist[card]):
-            deck.append(card)
-            deckname.append(card.name)
+def deckbuilder(list_to_use):
+    here_deck=[]
+    here_deckname=[]
+    for card in list_to_use:
+        for i in range(list_to_use[card]):
+            here_deck.append(card)
+            here_deckname.append(card.name)
     r.shuffle(deck)
-    print(deckname)
+    return here_deck, here_deckname
 
 
 window_dim=(1500,850)
+title_img=transform.scale(image.load("title.png"),(842,120))
 card_dim=(150,225)
-cut_dim=(225,230)
+card_dim_rot=(225,150)
+cut_dim=(169,172)
 item_dim=(150,150) #get back to this, change to better value
 starting_cards=5
 drawing_cards=2
@@ -155,25 +168,30 @@ attack_choosing_state=False
 HOST=''
 PORT=6543
 sock=''
-markers={"retry":False, "deck built":False}
+hands_anchor=(90,40)
+card_spacing_x=70
+card_spacing_y=50
+y_rails=[hands_anchor[1],hands_anchor[1]+card_spacing_y*2+card_dim_rot[1]+cut_dim[1]]
+x_rails=[hands_anchor[0],hands_anchor[0]+cut_dim[0]+card_spacing_x,hands_anchor[0]+cut_dim[0]*2+card_spacing_x*2]
+markers={"retry":False, "deck built":False, "do not connect":True}
 
 #define cards here
-milk=Item("Milk",2,None,r"Sprites\Milk.png",(0,0),r"Cut Sprites\Milk.png","blue")
+deck_plc=Item("Deck Placeholder",0,None,"card_back_rot.png",(100,262),"card_back_rot.png",None,card_dim_rot)
+milk=Item("Milk",2,None,r"Sprites\Milk.png",(0,0),r"Cut Sprites\Milk.png","blue",card_dim)
+elder=Mob("Elder",6,6,[],[],[],[],"aquatic","ocean","pink",r"Sprites\Elder.png",(0,0),r"Cut Sprites\Elder.png",None)
 
 decklist={milk:40}
 #playername=input("Enter your name: ")
 playername="J1"
-player1=Player(playername,1,None,None)
+player1=Player(playername,1,None,[(x_rails[0],y_rails[1]),(x_rails[1],y_rails[1]),(x_rails[2],y_rails[1])])
 player2=''
 
 screen=display.set_mode(window_dim)
 display.set_caption("Minecards")
 
 font.init()
-font_large=font.Font("mojangles.ttf",120)
 font=font.Font("mojangles.ttf",40)
-title_text=font_large.render("Minecards",True,(200,200,200))
-beta_text=font.render("Closed Beta",True,(200,200,200))
+beta_text=font.render("Closed Beta",True,(255,100,0))
 host_text=ClickableText(font,"Create Game",(0,0,0),(window_dim[0]/2-font.size("Create Game")[0]/2,550))
 connect_text=ClickableText(font,"Join Game",(0,0,0),(window_dim[0]/2-font.size("Join Game")[0]/2,650))
 connecting_text=font.render("Waiting for connection",True,(255,0,0))
@@ -194,7 +212,11 @@ while running:
         elif e.type == MOUSEBUTTONUP:
             pos=mouse.get_pos()
             if host_text.textrect.collidepoint(pos):
-                connect_state="hosting"
+                if markers["do not connect"]:
+                    state="game"
+                    player2=Player("Player 2",2,None,[(x_rails[0],y_rails[0]),(x_rails[1],y_rails[0]),(x_rails[2],y_rails[0])])
+                else:
+                    connect_state="hosting"
             elif connect_text.textrect.collidepoint(pos):
                 connect_state="connecting"
             elif ip_submit_text.textrect.collidepoint(pos) and state == "menu" and connect_state == "connecting":
@@ -214,7 +236,7 @@ while running:
                     HOST += e.unicode
 
     if state == "menu":
-        screen.blit(title_text,(window_dim[0]/2-font_large.size("Minecards")[0]/2,200))
+        screen.blit(title_img,(window_dim[0]/2-421,165))
         screen.blit(beta_text,(window_dim[0]/2-font.size("Closed Beta")[0]/2,320))
         if connect_state == "idle":
             screen.blit(host_text.text, host_text.position)
@@ -255,12 +277,26 @@ while running:
             sock.send(playername.encode())
 
     elif state == "game":
-        screen.blit(game_plc_text,(window_dim[0]/2-font.size("Await further programming")[0]/2,window_dim[1]/2))
+        if not markers["do not connect"]:
+            screen.blit(game_plc_text,(window_dim[0]/2-font.size("Await further programming")[0]/2,window_dim[1]/2))
         if markers["deck built"] == False:
-            deckbuilder()
+            deck, deck_name= deckbuilder(decklist)
+            for i in range(3):
+                player1.hand.append(deck.pop())
+                player2.hand.append(deck.pop())
+                player1.add_to_field(0,i+1)
+                player2.add_to_field(0,i+1)
             markers["deck built"]=True
+        screen.blit(deck_plc.current_sprite,(deck_plc.rect.x,deck_plc.rect.y))
         player1.update()
         player2.update()
 
     display.update()
     clock.tick(FPS)
+
+    '''
+    To-do:
+    1. Figure out how to unblock hosting socket
+    2. Display cards in hand
+    3. Make card variables for all 40? Certainly impractical. Either use groups or find some clever way
+    '''
