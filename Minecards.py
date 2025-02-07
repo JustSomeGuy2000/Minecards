@@ -18,7 +18,6 @@ class Mob(sprite.Sprite):
         self.passives=passives #dict, index is a trigger marker which allows functions to know when to call it, same for items
         self.moveset=attacks + abilities #used for finding which one was clicked
         self.move_positions=move_positions #hitboxes of moves, in order
-        #on click, detect which move position it falls under, get index number of that, get move from moveset
         self.items=items
         self.mob_class=mob_class
         self.biome=biome
@@ -26,6 +25,7 @@ class Mob(sprite.Sprite):
         self.border=border #blue or pink
         #SPRITE AND COORDS
         self.front_sprite=transform.scale(image.load(sprite),card_dim)
+        self.original_sprite=sprite
         self.cut_sprite=transform.scale(image.load(cut_sprite),cut_dim)
         self.back_sprite=transform.scale(image.load(cardback),card_dim)
         self.current_sprite=self.front_sprite
@@ -42,7 +42,7 @@ class Mob(sprite.Sprite):
             self.timer=time
             self.velocity=((dest[0]-self.rect.x)/time, (dest[1]-self.rect.y)/time)
 
-    def update(self, screen):
+    def update(self):
         if self.timer!=0:
             self.rect.x+=self.velocity[0]
             self.rect.y+=self.velocity[1]
@@ -67,6 +67,7 @@ class Item(sprite.Sprite):
         self.border=border
         #SPRITE AND COORDS
         self.front_sprite=transform.scale(image.load(sprite),dimensions)
+        self.original_sprite=sprite
         self.cut_sprite=transform.scale(image.load(cut_sprite),item_dim)
         self.back_sprite=transform.scale(image.load(cardback),card_dim)
         self.current_sprite=self.front_sprite
@@ -105,14 +106,15 @@ class Player():
         self.name=name
         self.player_number=player_number
         self.hand=[]
-        self.field={1:elder, 2:elder, 3:elder}
+        self.field={1:None, 2:None, 3:None}
         self.souls=0
         self.hand_pos=hand_pos
         self.field_pos=field_pos
 
     def update(self):
-        for card in self.hand:
-            card.update()
+        for i in range(len(self.hand)):
+            self.hand[i].rect.y, self.hand[i].rect.x= (self.hand_pos[1],self.hand_pos[0]+card_dim[0]*i)
+            self.hand[i].update()
             #display cards
         for card in self.field:
             if self.field[card] != None:
@@ -134,13 +136,12 @@ class ClickableText():
 
 def deckbuilder(list_to_use):
     here_deck=[]
-    here_deckname=[]
     for card in list_to_use:
         for i in range(list_to_use[card]):
-            here_deck.append(card)
-            here_deckname.append(card.name)
-    r.shuffle(deck)
-    return here_deck, here_deckname
+            actual_card=eval(card)
+            here_deck.append(actual_card)
+    r.shuffle(here_deck)
+    return here_deck
 
 
 window_dim=(1500,850)
@@ -158,32 +159,33 @@ FPS=60
 clock=time.Clock()
 background=transform.scale(image.load("background.png"),window_dim)
 deck=[]
-deck_name=[]
 turn=0
-which_player=0
 cardback="card_back.png"
-units_align_x=None
-units_align_y=None
 attack_choosing_state=False
 HOST=''
 PORT=6543
 sock=''
-hands_anchor=(90,40)
+fields_anchor=(90,40)
 card_spacing_x=70
 card_spacing_y=50
-y_rails=[hands_anchor[1],hands_anchor[1]+card_spacing_y*2+card_dim_rot[1]+cut_dim[1]]
-x_rails=[hands_anchor[0],hands_anchor[0]+cut_dim[0]+card_spacing_x,hands_anchor[0]+cut_dim[0]*2+card_spacing_x*2]
+y_rails=[fields_anchor[1],fields_anchor[1]+card_spacing_y*2+card_dim_rot[1]+cut_dim[1]]
+x_rails=[fields_anchor[0],fields_anchor[0]+cut_dim[0]+card_spacing_x,fields_anchor[0]+cut_dim[0]*2+card_spacing_x*2]
 markers={"retry":False, "deck built":False, "do not connect":True}
+selected=None
+selected_move=None
+attack_progressing=False
 
 #define cards here
+#Note: cards for deck use are defined by deckbuilder(), which takes these strings and eval()s them into objects
+#This is so each deck entry has a separate memory value
 deck_plc=Item("Deck Placeholder",0,None,"card_back_rot.png",(100,262),"card_back_rot.png",None,card_dim_rot)
-milk=Item("Milk",2,None,r"Sprites\Milk.png",(0,0),r"Cut Sprites\Milk.png","blue",card_dim)
-elder=Mob("Elder",6,6,[],[],[],[],"aquatic","ocean","pink",r"Sprites\Elder.png",(0,0),r"Cut Sprites\Elder.png",None)
+milk=r'Item("Milk",2,None,r"Sprites\Milk.png",(0,0),r"Cut Sprites\Milk.png","blue",card_dim)'
+elder=r'Mob("Elder",6,6,[],[],[],[],"aquatic","ocean","pink",r"Sprites\Elder.png",(0,0),r"Cut Sprites\Elder.png",None)'
 
-decklist={milk:40}
+decklist={milk:20, elder:20}
 #playername=input("Enter your name: ")
 playername="J1"
-player1=Player(playername,1,None,[(x_rails[0],y_rails[1]),(x_rails[1],y_rails[1]),(x_rails[2],y_rails[1])])
+player1=Player(playername,1,(fields_anchor[0],y_rails[1]+cut_dim[1]+card_spacing_y),[(x_rails[0],y_rails[1]),(x_rails[1],y_rails[1]),(x_rails[2],y_rails[1])])
 player2=''
 
 screen=display.set_mode(window_dim)
@@ -214,7 +216,7 @@ while running:
             if host_text.textrect.collidepoint(pos):
                 if markers["do not connect"]:
                     state="game"
-                    player2=Player("Player 2",2,None,[(x_rails[0],y_rails[0]),(x_rails[1],y_rails[0]),(x_rails[2],y_rails[0])])
+                    player2=Player("Player 2",2,(fields_anchor[0],fields_anchor[1]/2),[(x_rails[0],y_rails[0]),(x_rails[1],y_rails[0]),(x_rails[2],y_rails[0])])
                 else:
                     connect_state="hosting"
             elif connect_text.textrect.collidepoint(pos):
@@ -226,6 +228,21 @@ while running:
                     print("Connection successful")
                 except:
                     markers["retry"]=True
+
+            if state == "game":
+                for card in player1.field:
+                    if player1.field[card] != None and player1.field[card].rect.collidepoint(pos):
+                        selected=player1.field[card]
+                for card in player1.hand:
+                    if card.rect.collidepoint(pos):
+                        selected=card
+                for card in player2.field:
+                    if player2.field[card] != None and player2.field[card].rect.collidepoint(pos):
+                        selected=player2.field[card]
+                for card in player2.hand:
+                    if card.rect.collidepoint(pos):
+                        selected=card
+        
         elif e.type==KEYDOWN:
             if e.key==K_p:
                 print(str(mouse.get_pos()))
@@ -271,7 +288,7 @@ while running:
             t.sleep(1)
             player2name=sock.recv(4096).decode()
             print(f"Opp. name: {player2name}")
-            player2=Player(player2name,2,None,None)
+            player2=Player(player2name,2,(fields_anchor[0],fields_anchor[1]/2),[(x_rails[0],y_rails[0]),(x_rails[1],y_rails[0]),(x_rails[2],y_rails[0])])
             state="game"
         if sock in write_ready:
             sock.send(playername.encode())
@@ -280,14 +297,19 @@ while running:
         if not markers["do not connect"]:
             screen.blit(game_plc_text,(window_dim[0]/2-font.size("Await further programming")[0]/2,window_dim[1]/2))
         if markers["deck built"] == False:
-            deck, deck_name= deckbuilder(decklist)
+            deck = deckbuilder(decklist)
             for i in range(3):
                 player1.hand.append(deck.pop())
+                player1.hand.append(deck.pop())
+                player2.hand.append(deck.pop())
                 player2.hand.append(deck.pop())
                 player1.add_to_field(0,i+1)
                 player2.add_to_field(0,i+1)
             markers["deck built"]=True
         screen.blit(deck_plc.current_sprite,(deck_plc.rect.x,deck_plc.rect.y))
+        if selected != None:
+            large_image=transform.scale(image.load(selected.original_sprite),(card_dim[0]*3,card_dim[1]*3))
+            screen.blit(large_image,(930,100))
         player1.update()
         player2.update()
 
@@ -297,6 +319,30 @@ while running:
     '''
     To-do:
     1. Figure out how to unblock hosting socket
-    2. Display cards in hand
-    3. Make card variables for all 40? Certainly impractical. Either use groups or find some clever way
+    2. Display cards in hand (works, code in different display for player 2)
+    3. Implement rest of gameplay loop:
+        i. Select card on field (large card pops up at side), or card in hand
+        ii. Select attack, or field position to place card in
+        iii. Send and receive data
+        iv. Action phase, you attack, opponent counters, opponent attacks, you counter. Alternatively, a card is placed
+    4. Figure out animations: card going from hand to field, card attacking
+    5. Implement health and souls, decide where they're going to go
+    6. Add moves and passives for Mobs and effects for Items
+
+    Sequence for adding to field:
+    1. Click on card in hand: detected using card.rect.collidepoint(mouse position)
+    2. The card that is clicked adds itself to selected
+    3. The game loop displays whatever is selected
+    4. Click on field slot: detected using rect.collidepoint(mouse position) and field slot coords
+    5. If a valid slot is clicked, Player.add_to_field() is called
+
+    Sequence for attacking:
+    1. Card is automatically added to selected (as attacking goes in order)
+    2. The card that is clicked adds itself to selected
+    3. The game loop displays whatever is selected
+    4. Hover over an attack or ability: an orange hollow rectangle appears highlighting it: detected using rect.collidepoint(mouse position) and Mob.move_positions, drawn using draw.rect(); wait, can that draw hollow rectangles?
+    5. Click on move, is added to selected_move as Mob.moveset[x]: detected using collidepoint again, get index number of move_position clicked, move is that index number in moveset.
+    6. attack_progressing set to True
+    7. Click on a targetable Mob: detected using collidepoint again
+    8. Since attack_progressing is True, this calls the function from selectied_move and passes the current Mob as the argument
     '''
