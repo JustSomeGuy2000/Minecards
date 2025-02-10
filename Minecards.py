@@ -17,7 +17,9 @@ class Mob(sprite.Sprite):
         self.abilities=abilities 
         self.passives=passives #dict, index is a trigger marker which allows functions to know when to call it, same for items
         self.moveset=attacks + abilities #used for finding which one was clicked
-        self.move_positions=move_positions #hitboxes of moves, in order
+        self.move_positions=[]
+        for position in move_positions:
+            self.move_positions.append(Rect(position[0],position[1],position[2]-position[0],position[3]-position[1]))#hitboxes of moves, in order
         self.items=items
         self.mob_class=mob_class
         self.biome=biome
@@ -43,10 +45,17 @@ class Mob(sprite.Sprite):
             self.velocity=((dest[0]-self.rect.x)/time, (dest[1]-self.rect.y)/time)
 
     def update(self):
+        global move_hovering_over
         if self.timer!=0:
             self.rect.x+=self.velocity[0]
             self.rect.y+=self.velocity[1]
             self.timer-=1
+        for position in self.move_positions:
+            if selected == self and position.collidepoint(mouse.get_pos()) and not attack_progressing and self in player1.hand:
+                draw.rect(screen,(255,180,0),position,5)
+                move_hovering_over=(position,self.moveset[self.move_positions.index(position)])
+        if attack_progressing:
+            draw.rect(screen,(255,180,0),move_hovering_over[0],5)
         screen.blit(self.current_sprite, (self.rect.x,self.rect.y))
 
     def switch_sprite(self,final):
@@ -63,6 +72,7 @@ class Item(sprite.Sprite):
         #ITEM INFO
         self.name=name
         self.cost=cost
+        self.health=0
         self.effect=effect #a function that takes in a value and changes it appropriately
         self.border=border
         #SPRITE AND COORDS
@@ -113,12 +123,18 @@ class Player():
 
     def update(self):
         for i in range(len(self.hand)):
+            if self.player_number==2:
+                self.hand[i].switch_sprite("back")
             self.hand[i].rect.y, self.hand[i].rect.x= (self.hand_pos[1],self.hand_pos[0]+card_dim[0]*i)
             self.hand[i].update()
             #display cards
         for card in self.field:
             if self.field[card] != None:
                 self.field[card].update()
+                hearts_types=find_hearts(self.field[card].health)
+                for j in range(len(hearts_types)):
+                    for i in range(hearts_types[j]):
+                        screen.blit(hearts[j],(self.field[card].rect.x+(i+1)*(j)*token_dim[0]/2,hearts_rails[2-self.player_number]))
 
     def add_to_field(self,card,pos): #card is index number of hand card to take, pos is field position to take
         target=self.hand.pop(card)
@@ -143,13 +159,34 @@ def deckbuilder(list_to_use):
     r.shuffle(here_deck)
     return here_deck
 
+def find_hearts(hp):
+    result=[0,0,0,0]
+    temp=0
+    result[0]=hp//4
+    temp=hp%4
+    result[1]=temp//3
+    temp=temp%3
+    result[2]=temp//2
+    temp=temp%2
+    result[3]=temp
+    return result
+
+def warding_laser(origin, target):
+    print(f"Warding laser was used by {origin.name} on {target.name}.")
+    return origin, target, "ranged"
+
+def elders_curse():
+    pass
 
 window_dim=(1500,850)
 title_img=transform.scale(image.load("title.png"),(842,120))
 card_dim=(150,225)
 card_dim_rot=(225,150)
 cut_dim=(169,172)
-item_dim=(150,150) #get back to this, change to better value
+item_dim=(75,75) #get back to this, change to better value
+token_dim=(30,30)
+hearts=[transform.scale(image.load("hearts_4.png"),token_dim),transform.scale(image.load("hearts_3.png"),token_dim),transform.scale(image.load("hearts_2.png"),token_dim),transform.scale(image.load("hearts_1.png"),token_dim)]
+soul=transform.scale(image.load("soul.png"),token_dim)
 starting_cards=5
 drawing_cards=2
 running=True
@@ -170,17 +207,20 @@ card_spacing_x=70
 card_spacing_y=50
 y_rails=[fields_anchor[1],fields_anchor[1]+card_spacing_y*2+card_dim_rot[1]+cut_dim[1]]
 x_rails=[fields_anchor[0],fields_anchor[0]+cut_dim[0]+card_spacing_x,fields_anchor[0]+cut_dim[0]*2+card_spacing_x*2]
+hearts_rails=[y_rails[0]+cut_dim[0]+10,y_rails[1]-10-token_dim[1]]
 markers={"retry":False, "deck built":False, "do not connect":True}
-selected=None
-selected_move=None
-attack_progressing=False
+selected=None #card displayed on the side
+selected_move=None #move that has been selected
+attack_progressing=False #is it the attack target choosing stage
+move_hovering_over=None #tuple of Rect of attack being hovered over and attack function itself, used for click detection
 
 #define cards here
 #Note: cards for deck use are defined by deckbuilder(), which takes these strings and eval()s them into objects
 #This is so each deck entry has a separate memory value
 deck_plc=Item("Deck Placeholder",0,None,"card_back_rot.png",(100,262),"card_back_rot.png",None,card_dim_rot)
 milk=r'Item("Milk",2,None,r"Sprites\Milk.png",(0,0),r"Cut Sprites\Milk.png","blue",card_dim)'
-elder=r'Mob("Elder",6,6,[],[],[],[],"aquatic","ocean","pink",r"Sprites\Elder.png",(0,0),r"Cut Sprites\Elder.png",None)'
+elder=r'Mob("Elder",6,6,[],[warding_laser],{"end of turn":elders_curse},[],"aquatic","ocean","pink",r"Sprites\Elder.png",(0,0),r"Cut Sprites\Elder.png",[(987,522,1323,589)])'
+#Mob()
 
 decklist={milk:20, elder:20}
 #playername=input("Enter your name: ")
@@ -216,7 +256,7 @@ while running:
             if host_text.textrect.collidepoint(pos):
                 if markers["do not connect"]:
                     state="game"
-                    player2=Player("Player 2",2,(fields_anchor[0],fields_anchor[1]/2),[(x_rails[0],y_rails[0]),(x_rails[1],y_rails[0]),(x_rails[2],y_rails[0])])
+                    player2=Player("Player 2",2,(fields_anchor[0],fields_anchor[1]/2-card_dim[1]+10),[(x_rails[0],y_rails[0]),(x_rails[1],y_rails[0]),(x_rails[2],y_rails[0])])
                 else:
                     connect_state="hosting"
             elif connect_text.textrect.collidepoint(pos):
@@ -229,7 +269,7 @@ while running:
                 except:
                     markers["retry"]=True
 
-            if state == "game":
+            if state == "game" and not attack_progressing:
                 for card in player1.field:
                     if player1.field[card] != None and player1.field[card].rect.collidepoint(pos):
                         selected=player1.field[card]
@@ -240,8 +280,20 @@ while running:
                     if player2.field[card] != None and player2.field[card].rect.collidepoint(pos):
                         selected=player2.field[card]
                 for card in player2.hand:
-                    if card.rect.collidepoint(pos):
+                    if card.rect.collidepoint(pos) and card.current_sprite != card.back_sprite:
                         selected=card
+                if move_hovering_over != None:
+                    if move_hovering_over[0].collidepoint(pos):
+                        selected_move=move_hovering_over[1]
+                        attack_progressing=True
+
+            if attack_progressing:
+                for card in player2.field:
+                    if player2.field[card].rect.collidepoint(pos):
+                        selected_move(selected,player2.field[card])
+                        attack_progressing=False
+                        selected_move=None
+                        move_hovering_over=None
         
         elif e.type==KEYDOWN:
             if e.key==K_p:
@@ -344,5 +396,9 @@ while running:
     5. Click on move, is added to selected_move as Mob.moveset[x]: detected using collidepoint again, get index number of move_position clicked, move is that index number in moveset.
     6. attack_progressing set to True
     7. Click on a targetable Mob: detected using collidepoint again
-    8. Since attack_progressing is True, this calls the function from selectied_move and passes the current Mob as the argument
+    8. Since attack_progressing is True, this calls the function from selectied_move and passes the current Mob and original Mob as the arguments
+
+    Passive conditions:
+    "end of turn": Called at the end of the attack phase (not yet implemented)
+    "on death": Called when health is 0
     '''
