@@ -1,13 +1,20 @@
 from pygame import *
+from collections.abc import Callable
+from typing import Literal
 import random as r
 import time as t
 import socket
 import select
+
+type Card = Mob|Item
+type Coord = tuple[int,int]
+type Size = tuple[int,int]
+type Path = str
 #Name:LAPTOP-20C14P7N, Address:172.20.57.66
 #None values mean add later
 
 class Mob(sprite.Sprite):
-    def __init__(self,name,cost,health,abilities,attacks,passives,items,mob_class,biome,border,sprite,init_pos,cut_sprite,move_positions):
+    def __init__(self,name:str,cost:int,health:int,abilities:list[Callable],attacks:list[Callable],passives:dict[str,Callable],items:list,mob_class:Literal["undead","arthropod","aquatic","human","misc"],biome:str,border:Literal["blue","pink"],sprite:Path,init_pos:Coord,cut_sprite:Path,move_positions:list[tuple[int,int,int,int]],on_death:Callable):
         super().__init__()
         #MOB INFO
         self.name=name
@@ -25,6 +32,7 @@ class Mob(sprite.Sprite):
         self.biome=biome
         self.status={"psn":0,"frz":0,"fire":0}
         self.border=border #blue or pink
+        self.on_death=on_death
         #SPRITE AND COORDS
         self.front_sprite=transform.scale(image.load(sprite),card_dim)
         self.original_sprite=sprite
@@ -35,14 +43,18 @@ class Mob(sprite.Sprite):
         self.rect.x=init_pos[0]
         self.rect.y=init_pos[1]
         #MOVEMENT
+        self.movement_phase=0 #indicates which location is currently being moved to
+        self.destinations=[] #the list of locations to move to, in order
+        self.times=[]
         self.timer=0
         self.velocity=(0,0)
 
-    def startmove(self,dest,time): #destination as a coord tuple, time in frames
-        if self.timer==0:
-            self.dest=dest
-            self.timer=time
-            self.velocity=((dest[0]-self.rect.x)/time, (dest[1]-self.rect.y)/time)
+    def startmove(self,dests:list[Coord],times:list[int]): #destination as a list coord tuple, times in frames
+        if self.timer==0: #change to accept lists of dests and coords
+            self.destinations=dests
+            self.times=times
+            self.timer=self.times[self.movement_phase]
+            self.velocity=((self.destinations[self.movement_phase][0]-self.rect.x)/self.timer, (self.destinations[self.movement_phase][1]-self.rect.y)/self.timer)
 
     def update(self):
         global move_hovering_over
@@ -50,15 +62,25 @@ class Mob(sprite.Sprite):
             self.rect.x+=self.velocity[0]
             self.rect.y+=self.velocity[1]
             self.timer-=1
+        elif self.timer == 0 and self.movement_phase != len(self.destinations)-1 and self.destinations != []:
+            self.movement_phase += 1
+            self.timer=self.times[self.movement_phase]
+            self.velocity=((self.destinations[self.movement_phase][0]-self.rect.x)/self.timer, (self.destinations[self.movement_phase][1]-self.rect.y)/self.timer)
+        else:
+            self.destinations=[]
+            self.times=[]
         for position in self.move_positions:
-            if selected == self and position.collidepoint(mouse.get_pos()) and not attack_progressing and self in player1.hand:
+            if selected == self and position.collidepoint(mouse.get_pos()) and not attack_progressing and self in list(player1.field.values()):
                 draw.rect(screen,(255,180,0),position,5)
                 move_hovering_over=(position,self.moveset[self.move_positions.index(position)])
         if attack_progressing:
             draw.rect(screen,(255,180,0),move_hovering_over[0],5)
+        if self.health == 0:
+            if self.on_death != None:
+                self.on_death()
         screen.blit(self.current_sprite, (self.rect.x,self.rect.y))
 
-    def switch_sprite(self,final):
+    def switch_sprite(self,final:Literal["front","back","cut"]):
         if final == "front":
             self.current_sprite=self.front_sprite
         elif final == "back":
@@ -68,7 +90,7 @@ class Mob(sprite.Sprite):
         self.rect=self.current_sprite.get_rect()
 
 class Item(sprite.Sprite):
-    def __init__(self,name,cost,effect,sprite,init_pos,cut_sprite,border,dimensions):
+    def __init__(self,name:str,cost:int,effect:Callable,sprite:Path,init_pos:Coord,cut_sprite:Path,border:Literal["blue","pink"],dimensions:Size):
         #ITEM INFO
         self.name=name
         self.cost=cost
@@ -86,22 +108,34 @@ class Item(sprite.Sprite):
         self.rect.y=init_pos[1]
         #MOVEMENT
         self.timer=0
+        self.movement_phase=0
+        self.destinations=[]
+        self.times=[]
         self.velocity=(0,0)
 
-    def startmove(self,dest,time): #destination as a coord tuple, time in frames
-        if self.timer==0:
-            self.dest=dest
-            self.timer=time
-            self.velocity=((dest[0]-self.rect.x)/time, (dest[1]-self.rect.y)/time)
+    def startmove(self,dests:list[Coord],times:list[int]): #destination as a coord tuple, time in frames
+        if self.timer==0: #change to accept lists of dests and coords
+            self.destinations=dests
+            self.times=times
+            self.timer=self.times[self.movement_phase]
+            self.velocity=((self.destinations[self.movement_phase][0]-self.rect.x)/self.timer, (self.destinations[self.movement_phase][1]-self.rect.y)/self.timer)
+
 
     def update(self):
         if self.timer!=0:
             self.rect.x+=self.velocity[0]
             self.rect.y+=self.velocity[1]
             self.timer-=1
+        elif self.timer == 0 and self.movement_phase != len(self.destinations)-1 and self.destinations != []:
+            self.movement_phase += 1
+            self.timer=self.times[self.movement_phase]
+            self.velocity=((self.destinations[self.movement_phase][0]-self.rect.x)/self.timer, (self.destinations[self.movement_phase][1]-self.rect.y)/self.timer)
+        else:
+            self.destinations=[]
+            self.times=[]
         screen.blit(self.current_sprite, (self.rect.x,self.rect.y))
 
-    def switch_sprite(self, final):
+    def switch_sprite(self, final:Literal["front","back","cut"]):
         if final == "front":
             self.current_sprite=self.front_sprite
         elif final == "back":
@@ -112,7 +146,7 @@ class Item(sprite.Sprite):
 
 
 class Player():
-    def __init__(self,name,player_number,hand_pos,field_pos):
+    def __init__(self,name:str,player_number:int,hand_pos:Coord,field_pos:list[Coord]):
         self.name=name
         self.player_number=player_number
         self.hand=[]
@@ -135,22 +169,27 @@ class Player():
                 for j in range(len(hearts_types)):
                     for i in range(hearts_types[j]):
                         screen.blit(hearts[j],(self.field[card].rect.x+(i+1)*(j)*token_dim[0]/2,hearts_rails[2-self.player_number]))
+                if self.field[card].health == 0:
+                    self.field[card]=None
 
-    def add_to_field(self,card,pos): #card is index number of hand card to take, pos is field position to take
+    def add_to_field(self,card:int,pos:int): #card is index number of hand card to take, pos is field position to take
         target=self.hand.pop(card)
         self.field[pos]=target
         target.switch_sprite("cut")
         target.rect.x, target.rect.y=self.field_pos[pos-1]
 
 class ClickableText():
-    def __init__(self,font,text,colour,position):
+    def __init__(self,font,text:str,colour:tuple[int,int,int],position:Coord):
         self.text=font.render(text,True,colour)
         self.textrect=self.text.get_rect()
         self.position=position
         self.textrect.x=position[0]
         self.textrect.y=position[1]
 
-def deckbuilder(list_to_use):
+def nofunction(): #so i don't have to keep putting in checks if a move or something is None
+    pass
+
+def deckbuilder(list_to_use:dict[Card,int]) -> list[Card]:
     here_deck=[]
     for card in list_to_use:
         for i in range(list_to_use[card]):
@@ -159,7 +198,7 @@ def deckbuilder(list_to_use):
     r.shuffle(here_deck)
     return here_deck
 
-def find_hearts(hp):
+def find_hearts(hp:int) -> list[int]:
     result=[0,0,0,0]
     temp=0
     result[0]=hp//4
@@ -171,11 +210,24 @@ def find_hearts(hp):
     result[3]=temp
     return result
 
-def warding_laser(origin, target):
-    print(f"Warding laser was used by {origin.name} on {target.name}.")
-    return origin, target, "ranged"
+def warding_laser(origin:Mob, target:Mob, player:Player) -> bool:
+    opp=None
+    if player.player_number == 1:
+        opp=player2
+    else:
+        opp=player1
+    dmg=abs(list(opp.field.values()).index(target)-list(player.field.values()).index(origin))+1
+    target.health-=dmg
+    #figure out the distance-based damage
+    return False
 
 def elders_curse():
+    pass
+
+def start_of_turn():
+    pass
+
+def end_of_turn():
     pass
 
 window_dim=(1500,850)
@@ -208,7 +260,7 @@ card_spacing_y=50
 y_rails=[fields_anchor[1],fields_anchor[1]+card_spacing_y*2+card_dim_rot[1]+cut_dim[1]]
 x_rails=[fields_anchor[0],fields_anchor[0]+cut_dim[0]+card_spacing_x,fields_anchor[0]+cut_dim[0]*2+card_spacing_x*2]
 hearts_rails=[y_rails[0]+cut_dim[0]+10,y_rails[1]-10-token_dim[1]]
-markers={"retry":False, "deck built":False, "do not connect":True}
+markers={"retry":False, "deck built":False, "do not connect":True, "start of turn called":False}
 selected=None #card displayed on the side
 selected_move=None #move that has been selected
 attack_progressing=False #is it the attack target choosing stage
@@ -219,10 +271,10 @@ move_hovering_over=None #tuple of Rect of attack being hovered over and attack f
 #This is so each deck entry has a separate memory value
 deck_plc=Item("Deck Placeholder",0,None,"card_back_rot.png",(100,262),"card_back_rot.png",None,card_dim_rot)
 milk=r'Item("Milk",2,None,r"Sprites\Milk.png",(0,0),r"Cut Sprites\Milk.png","blue",card_dim)'
-elder=r'Mob("Elder",6,6,[],[warding_laser],{"end of turn":elders_curse},[],"aquatic","ocean","pink",r"Sprites\Elder.png",(0,0),r"Cut Sprites\Elder.png",[(987,522,1323,589)])'
+elder=r'Mob("Elder",6,6,[],[warding_laser],{"end of turn":elders_curse},[],"aquatic","ocean","pink",r"Sprites\Elder.png",(0,0),r"Cut Sprites\Elder.png",[(987,522,1323,589)],None)'
 #Mob()
 
-decklist={milk:20, elder:20}
+decklist={elder:40}
 #playername=input("Enter your name: ")
 playername="J1"
 player1=Player(playername,1,(fields_anchor[0],y_rails[1]+cut_dim[1]+card_spacing_y),[(x_rails[0],y_rails[1]),(x_rails[1],y_rails[1]),(x_rails[2],y_rails[1])])
@@ -289,8 +341,10 @@ while running:
 
             if attack_progressing:
                 for card in player2.field:
-                    if player2.field[card].rect.collidepoint(pos):
-                        selected_move(selected,player2.field[card])
+                    if player2.field[card] != None and  player2.field[card].rect.collidepoint(pos):
+                        counter=selected_move(selected,player2.field[card],player1)
+                        if counter == True:
+                            player2.field[card].moveset[0](player2.field[card],selected,player2)
                         attack_progressing=False
                         selected_move=None
                         move_hovering_over=None
@@ -346,6 +400,9 @@ while running:
             sock.send(playername.encode())
 
     elif state == "game":
+        if not markers["start of turn called"]:
+            start_of_turn()
+            markers["start of turn called"]=True
         if not markers["do not connect"]:
             screen.blit(game_plc_text,(window_dim[0]/2-font.size("Await further programming")[0]/2,window_dim[1]/2))
         if markers["deck built"] == False:
@@ -371,15 +428,14 @@ while running:
     '''
     To-do:
     1. Figure out how to unblock hosting socket
-    2. Display cards in hand (works, code in different display for player 2)
-    3. Implement rest of gameplay loop:
+    2. Implement rest of gameplay loop:
         i. Select card on field (large card pops up at side), or card in hand
         ii. Select attack, or field position to place card in
         iii. Send and receive data
         iv. Action phase, you attack, opponent counters, opponent attacks, you counter. Alternatively, a card is placed
-    4. Figure out animations: card going from hand to field, card attacking
-    5. Implement health and souls, decide where they're going to go
-    6. Add moves and passives for Mobs and effects for Items
+    3. Figure out animations: card going from hand to field, card attacking
+    4. Implement souls, decide where they're going to go
+    5. Add moves and passives for Mobs and effects for Items
 
     Sequence for adding to field:
     1. Click on card in hand: detected using card.rect.collidepoint(mouse position)
@@ -400,5 +456,6 @@ while running:
 
     Passive conditions:
     "end of turn": Called at the end of the attack phase (not yet implemented)
+    "start of turn": Called at the start of the turn, in the function start_of_turn()
     "on death": Called when health is 0
     '''
