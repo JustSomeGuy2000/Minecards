@@ -1,3 +1,4 @@
+from __future__ import annotations
 from pygame import *
 from collections.abc import Callable
 from typing import Literal
@@ -7,19 +8,20 @@ import socket
 import select
 
 type Card = Mob|Item
-type Coord = tuple[int,int]
+type Coord = tuple[int|float,int|float]
 type Size = tuple[int,int]
 type Path = str
 #Name:LAPTOP-20C14P7N, Address:172.20.57.66
 #None values mean add later
 
 class Mob(sprite.Sprite):
-    def __init__(self,name:str,cost:int,health:int,abilities:list[Callable],attacks:list[Callable],passives:dict[str,Callable],items:list,mob_class:Literal["undead","arthropod","aquatic","human","misc"],biome:str,border:Literal["blue","pink"],sprite:Path,init_pos:Coord,cut_sprite:Path,move_positions:list[tuple[int,int,int,int]],on_death:Callable):
+    def __init__(self,name:str,cost:int,health:int,abilities:list[Callable],attacks:list[Callable],passives:dict[Literal["end of turn","start of turn","on death","on hurt","when played"],Callable],items:list[Item],mob_class:Literal["undead","arthropod","aquatic","human","misc"],biome:Literal["plains","cavern","ocean","swamp"],border:Literal["blue","pink"],sprite:Path,init_pos:Coord,cut_sprite:Path,move_positions:list[tuple[int,int,int,int]]):
         super().__init__()
         #MOB INFO
         self.name=name
         self.cost=cost
         self.health=health
+        self.max_health=health
         #passives listed first on card, then attacks, then abilities
         self.abilities=abilities 
         self.passives=passives #dict, index is a trigger marker which allows functions to know when to call it, same for items
@@ -32,7 +34,6 @@ class Mob(sprite.Sprite):
         self.biome=biome
         self.status={"psn":0,"frz":0,"fire":0}
         self.border=border #blue or pink
-        self.on_death=on_death
         #SPRITE AND COORDS
         self.front_sprite=transform.scale(image.load(sprite),card_dim)
         self.original_sprite=sprite
@@ -49,8 +50,8 @@ class Mob(sprite.Sprite):
         self.timer=0
         self.velocity=(0,0)
 
-    def startmove(self,dests:list[Coord],times:list[int]): #destination as a list coord tuple, times in frames
-        if self.timer==0: #change to accept lists of dests and coords
+    def startmove(self,dests:list[Coord],times:list[int]):
+        if self.timer==0:
             self.destinations=dests
             self.times=times
             self.timer=self.times[self.movement_phase]
@@ -69,15 +70,13 @@ class Mob(sprite.Sprite):
         else:
             self.destinations=[]
             self.times=[]
+            self.movement_phase=0
         for position in self.move_positions:
             if selected == self and position.collidepoint(mouse.get_pos()) and not attack_progressing and self in list(player1.field.values()):
-                draw.rect(screen,(255,180,0),position,5)
+                draw.rect(screen,ORANGE,position,5)
                 move_hovering_over=(position,self.moveset[self.move_positions.index(position)])
         if attack_progressing:
-            draw.rect(screen,(255,180,0),move_hovering_over[0],5)
-        if self.health == 0:
-            if self.on_death != None:
-                self.on_death()
+            draw.rect(screen,ORANGE,move_hovering_over[0],5)
         screen.blit(self.current_sprite, (self.rect.x,self.rect.y))
 
     def switch_sprite(self,final:Literal["front","back","cut"]):
@@ -150,10 +149,14 @@ class Player():
         self.name=name
         self.player_number=player_number
         self.hand=[]
-        self.field={1:None, 2:None, 3:None}
-        self.souls=0
+        self.field: list[None|Mob]=[]
+        self.souls=10
         self.hand_pos=hand_pos
         self.field_pos=field_pos
+        if player_number == 1:
+            self.souls_pos=(field_pos[2][0]+cut_dim[0]+10,window_dim[1]-token_dim[1]-10)
+        elif player_number == 2:
+            self.souls_pos=(field_pos[2][0]+cut_dim[0]+10,10)
 
     def update(self):
         for i in range(len(self.hand)):
@@ -163,18 +166,22 @@ class Player():
             self.hand[i].update()
             #display cards
         for card in self.field:
-            if self.field[card] != None:
-                self.field[card].update()
-                hearts_types=find_hearts(self.field[card].health)
+            if card != None:
+                card.update()
+                hearts_types=find_hearts(card.health)
                 for j in range(len(hearts_types)):
                     for i in range(hearts_types[j]):
-                        screen.blit(hearts[j],(self.field[card].rect.x+(i+1)*(j)*token_dim[0]/2,hearts_rails[2-self.player_number]))
-                if self.field[card].health == 0:
-                    self.field[card]=None
+                        screen.blit(hearts[j],(card.rect.x+(i+1)*(j)*token_dim[0]/2,hearts_rails[2-self.player_number]))
+                if card.health <= 0:
+                    if "on death" in card.passives:
+                        card.passives["on_death"]()
+                    card=None
+        for i in range(self.souls):
+            screen.blit(soul,(self.souls_pos[0]+token_dim[0]*i,self.souls_pos[1]))
 
     def add_to_field(self,card:int,pos:int): #card is index number of hand card to take, pos is field position to take
         target=self.hand.pop(card)
-        self.field[pos]=target
+        self.field[pos+1]=target
         target.switch_sprite("cut")
         target.rect.x, target.rect.y=self.field_pos[pos-1]
 
@@ -218,11 +225,27 @@ def warding_laser(origin:Mob, target:Mob, player:Player) -> bool:
         opp=player1
     dmg=abs(list(opp.field.values()).index(target)-list(player.field.values()).index(origin))+1
     target.health-=dmg
-    #figure out the distance-based damage
+    if "on hurt" in target.passives:
+        target.passives["on hurt"](origin,target,dmg)
     return False
 
-def elders_curse():
+def bite(origin:Mob,target:Mob,player:Player) -> bool:
+    opp=None
+    if player.player_number == 1:
+        opp=player2
+    else:
+        opp=player1
+    target.health-=2
+    if "on hurt" in target.passives:
+        target.passives["on hurt"](origin,target,2)
+    return True
+
+def elders_curse(): #end of turn
     pass
+
+def undead(origin:Mob,target:Mob,damage:int): #on hurt
+    if origin.health == origin.max_health and damage >= origin.health:
+        origin.health=1
 
 def start_of_turn():
     pass
@@ -253,6 +276,7 @@ cardback="card_back.png"
 attack_choosing_state=False
 HOST=''
 PORT=6543
+ORANGE = (255,180,0)
 sock=''
 fields_anchor=(90,40)
 card_spacing_x=70
@@ -271,10 +295,11 @@ move_hovering_over=None #tuple of Rect of attack being hovered over and attack f
 #This is so each deck entry has a separate memory value
 deck_plc=Item("Deck Placeholder",0,None,"card_back_rot.png",(100,262),"card_back_rot.png",None,card_dim_rot)
 milk=r'Item("Milk",2,None,r"Sprites\Milk.png",(0,0),r"Cut Sprites\Milk.png","blue",card_dim)'
-elder=r'Mob("Elder",6,6,[],[warding_laser],{"end of turn":elders_curse},[],"aquatic","ocean","pink",r"Sprites\Elder.png",(0,0),r"Cut Sprites\Elder.png",[(987,522,1323,589)],None)'
+elder=r'Mob("Elder",6,6,[],[warding_laser],{"end of turn":elders_curse},[],"aquatic","ocean","pink",r"Sprites\Elder.png",(0,0),r"Cut Sprites\Elder.png",[(987,522,1323,589)])'
+zombie=r'Mob("Zombie",2,4,[],[bite],{"on hurt":undead},[],"undead","cavern","blue",r"Sprites\Zombie.png",(0,0),r"Cut Sprites\Zombie.png",[(987,512,1323,579)])'
 #Mob()
 
-decklist={elder:40}
+decklist={elder:20,zombie:20}
 #playername=input("Enter your name: ")
 playername="J1"
 player1=Player(playername,1,(fields_anchor[0],y_rails[1]+cut_dim[1]+card_spacing_y),[(x_rails[0],y_rails[1]),(x_rails[1],y_rails[1]),(x_rails[2],y_rails[1])])
@@ -323,14 +348,14 @@ while running:
 
             if state == "game" and not attack_progressing:
                 for card in player1.field:
-                    if player1.field[card] != None and player1.field[card].rect.collidepoint(pos):
-                        selected=player1.field[card]
+                    if card != None and card.rect.collidepoint(pos):
+                        selected=card
                 for card in player1.hand:
                     if card.rect.collidepoint(pos):
                         selected=card
                 for card in player2.field:
-                    if player2.field[card] != None and player2.field[card].rect.collidepoint(pos):
-                        selected=player2.field[card]
+                    if card != None and card.rect.collidepoint(pos):
+                        selected=card
                 for card in player2.hand:
                     if card.rect.collidepoint(pos) and card.current_sprite != card.back_sprite:
                         selected=card
@@ -341,10 +366,12 @@ while running:
 
             if attack_progressing:
                 for card in player2.field:
-                    if player2.field[card] != None and  player2.field[card].rect.collidepoint(pos):
-                        counter=selected_move(selected,player2.field[card],player1)
+                    if card != None and  card.rect.collidepoint(pos):
+                        target=card
+                        counter=selected_move(selected,target,player1)
+                        #selected.startmove([(target.rect.x,target.rect.y),(selected.rect.x,selected.rect.y)],[10,10])
                         if counter == True:
-                            player2.field[card].moveset[0](player2.field[card],selected,player2)
+                            card.moveset[0](target,selected,player2)
                         attack_progressing=False
                         selected_move=None
                         move_hovering_over=None
@@ -418,12 +445,14 @@ while running:
         screen.blit(deck_plc.current_sprite,(deck_plc.rect.x,deck_plc.rect.y))
         if selected != None:
             large_image=transform.scale(image.load(selected.original_sprite),(card_dim[0]*3,card_dim[1]*3))
+            test=draw.rect(screen,ORANGE,Rect(selected.rect.x-5,selected.rect.y-5,selected.rect.width+10,selected.rect.height+10),5)
             screen.blit(large_image,(930,100))
         player1.update()
         player2.update()
 
     display.update()
     clock.tick(FPS)
+    print(clock.get_fps())
 
     '''
     To-do:
@@ -434,8 +463,9 @@ while running:
         iii. Send and receive data
         iv. Action phase, you attack, opponent counters, opponent attacks, you counter. Alternatively, a card is placed
     3. Figure out animations: card going from hand to field, card attacking
-    4. Implement souls, decide where they're going to go
-    5. Add moves and passives for Mobs and effects for Items
+    4. Add moves and passives for Mobs and effects for Items
+    5. Impement combat loop and turn ends and starts
+    6. Figure out why movement is so choppy
 
     Sequence for adding to field:
     1. Click on card in hand: detected using card.rect.collidepoint(mouse position)
