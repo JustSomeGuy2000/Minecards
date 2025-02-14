@@ -6,6 +6,7 @@ import random as r
 import time as t
 import socket
 import select
+import math
 
 type Card = Mob|Item
 type Coord = tuple[int|float,int|float]
@@ -72,7 +73,7 @@ class Mob(sprite.Sprite):
             self.times=[]
             self.movement_phase=0
         for position in self.move_positions:
-            if selected == self and position.collidepoint(mouse.get_pos()) and not attack_progressing and self in list(player1.field.values()):
+            if selected == self and position.collidepoint(mouse.get_pos()) and not attack_progressing and self == player1.field[subturn-1]:
                 draw.rect(screen,ORANGE,position,5)
                 move_hovering_over=(position,self.moveset[self.move_positions.index(position)])
         if attack_progressing:
@@ -119,7 +120,6 @@ class Item(sprite.Sprite):
             self.timer=self.times[self.movement_phase]
             self.velocity=((self.destinations[self.movement_phase][0]-self.rect.x)/self.timer, (self.destinations[self.movement_phase][1]-self.rect.y)/self.timer)
 
-
     def update(self):
         if self.timer!=0:
             self.rect.x+=self.velocity[0]
@@ -149,14 +149,15 @@ class Player():
         self.name=name
         self.player_number=player_number
         self.hand=[]
-        self.field: list[None|Mob]=[]
-        self.souls=10
+        self.field: list[None|Mob]=[None,None,None]
+        self.souls=1
         self.hand_pos=hand_pos
         self.field_pos=field_pos
+        self.soul_colour=list(SOUL_COLOUR)
         if player_number == 1:
-            self.souls_pos=(field_pos[2][0]+cut_dim[0]+10,window_dim[1]-token_dim[1]-10)
+            self.souls_pos=(field_pos[2][0]+cut_dim[0]+10,window_dim[1]-token_dim[1]-card_dim[1])
         elif player_number == 2:
-            self.souls_pos=(field_pos[2][0]+cut_dim[0]+10,10)
+            self.souls_pos=(field_pos[2][0]+cut_dim[0]+10,50)
 
     def update(self):
         for i in range(len(self.hand)):
@@ -168,22 +169,39 @@ class Player():
         for card in self.field:
             if card != None:
                 card.update()
-                hearts_types=find_hearts(card.health)
-                for j in range(len(hearts_types)):
-                    for i in range(hearts_types[j]):
-                        screen.blit(hearts[j],(card.rect.x+(i+1)*(j)*token_dim[0]/2,hearts_rails[2-self.player_number]))
+                draw.rect(screen,(255,0,0),Rect(card.rect.x,hearts_rails[2-self.player_number],cut_dim[0]*card.health/card.max_health,20))
+                screen.blit(small_font.render(str(card.health),True,(255,255,255)),(card.rect.x+5,hearts_rails[2-self.player_number]+1))
+                screen.blit(small_font.render(str(card.max_health),True,(255,255,255)),(card.rect.x-5+cut_dim[0]-round(small_font.size(str(card.max_health))[0]),hearts_rails[2-self.player_number]+1))
                 if card.health <= 0:
                     if "on death" in card.passives:
                         card.passives["on_death"]()
-                    card=None
-        for i in range(self.souls):
-            screen.blit(soul,(self.souls_pos[0]+token_dim[0]*i,self.souls_pos[1]))
+                    self.field[self.field.index(card)]=None
+        screen.blit(soul,self.souls_pos)
+        screen.blit(mjgs.render(str(self.souls),True,tuple(self.soul_colour)),(self.souls_pos[0]+token_dim[0]+5,self.souls_pos[1]-2))
+        if self.player_number == 1 and markers["not enough souls"][0] != 0:
+            if markers["not enough souls"][2] == 0:
+                self.soul_colour[1] -= 255/markers["not enough souls"][1]/2
+                self.soul_colour[2] -= 255/markers["not enough souls"][1]/2
+                markers["not enough souls"][3] += 1
+            elif markers["not enough souls"][2] == 1:
+                self.soul_colour[1] += 255/markers["not enough souls"][1]/2
+                self.soul_colour[2] += 255/markers["not enough souls"][1]/2
+                markers["not enough souls"][3] += 1
+            if markers["not enough souls"][3] == markers["not enough souls"][1]:
+                markers["not enough souls"][3] = 0
+                if markers["not enough souls"][2] == 1:
+                    markers["not enough souls"][2] = 0
+                elif markers["not enough souls"][2] == 0:
+                    markers["not enough souls"][2] = 1
+                markers["not enough souls"][0] -= 1
 
-    def add_to_field(self,card:int,pos:int): #card is index number of hand card to take, pos is field position to take
+    def add_to_field(self,card:int,pos:int,ignore_cost:bool=False): #card is index number of hand card to take, pos is field position to take
         target=self.hand.pop(card)
-        self.field[pos+1]=target
+        self.field[pos-1]=target
         target.switch_sprite("cut")
         target.rect.x, target.rect.y=self.field_pos[pos-1]
+        if not ignore_cost:
+            self.souls -= target.cost
 
 class ClickableText():
     def __init__(self,font,text:str,colour:tuple[int,int,int],position:Coord):
@@ -205,39 +223,24 @@ def deckbuilder(list_to_use:dict[Card,int]) -> list[Card]:
     r.shuffle(here_deck)
     return here_deck
 
-def find_hearts(hp:int) -> list[int]:
-    result=[0,0,0,0]
-    temp=0
-    result[0]=hp//4
-    temp=hp%4
-    result[1]=temp//3
-    temp=temp%3
-    result[2]=temp//2
-    temp=temp%2
-    result[3]=temp
-    return result
-
-def warding_laser(origin:Mob, target:Mob, player:Player) -> bool:
-    opp=None
-    if player.player_number == 1:
-        opp=player2
-    else:
-        opp=player1
-    dmg=abs(list(opp.field.values()).index(target)-list(player.field.values()).index(origin))+1
-    target.health-=dmg
-    if "on hurt" in target.passives:
-        target.passives["on hurt"](origin,target,dmg)
+def warding_laser(origin:Mob, target:Mob, player:Player, noattack=False) -> bool:
+    if noattack == False:
+        opp=None
+        if player.player_number == 1:
+            opp=player2
+        else:
+            opp=player1
+        dmg=abs(opp.field.index(target)-player.field.index(origin))+1
+        target.health-=dmg
+        if "on hurt" in target.passives:
+            target.passives["on hurt"](origin,target,dmg)
     return False
 
-def bite(origin:Mob,target:Mob,player:Player) -> bool:
-    opp=None
-    if player.player_number == 1:
-        opp=player2
-    else:
-        opp=player1
-    target.health-=2
-    if "on hurt" in target.passives:
-        target.passives["on hurt"](origin,target,2)
+def bite(origin:Mob, target:Mob, player:Player, noattack=False) -> bool:
+    if noattack == False:
+        target.health-=2
+        if "on hurt" in target.passives:
+            target.passives["on hurt"](origin,target,2)
     return True
 
 def elders_curse(): #end of turn
@@ -260,7 +263,6 @@ card_dim_rot=(225,150)
 cut_dim=(169,172)
 item_dim=(75,75) #get back to this, change to better value
 token_dim=(30,30)
-hearts=[transform.scale(image.load("hearts_4.png"),token_dim),transform.scale(image.load("hearts_3.png"),token_dim),transform.scale(image.load("hearts_2.png"),token_dim),transform.scale(image.load("hearts_1.png"),token_dim)]
 soul=transform.scale(image.load("soul.png"),token_dim)
 starting_cards=5
 drawing_cards=2
@@ -272,19 +274,21 @@ clock=time.Clock()
 background=transform.scale(image.load("background.png"),window_dim)
 deck=[]
 turn=0
+subturn=1
 cardback="card_back.png"
 attack_choosing_state=False
 HOST=''
 PORT=6543
 ORANGE = (255,180,0)
+SOUL_COLOUR=(255,255,255)
 sock=''
 fields_anchor=(90,40)
 card_spacing_x=70
 card_spacing_y=50
 y_rails=[fields_anchor[1],fields_anchor[1]+card_spacing_y*2+card_dim_rot[1]+cut_dim[1]]
 x_rails=[fields_anchor[0],fields_anchor[0]+cut_dim[0]+card_spacing_x,fields_anchor[0]+cut_dim[0]*2+card_spacing_x*2]
-hearts_rails=[y_rails[0]+cut_dim[0]+10,y_rails[1]-10-token_dim[1]]
-markers={"retry":False, "deck built":False, "do not connect":True, "start of turn called":False}
+hearts_rails=[y_rails[0]+cut_dim[0]+10,y_rails[1]-10-20] #0: player 2, 1: player 1
+markers={"retry":False, "deck built":False, "do not connect":True, "start of turn called":False, "not enough souls":[0,0,0]}
 selected=None #card displayed on the side
 selected_move=None #move that has been selected
 attack_progressing=False #is it the attack target choosing stage
@@ -299,26 +303,27 @@ elder=r'Mob("Elder",6,6,[],[warding_laser],{"end of turn":elders_curse},[],"aqua
 zombie=r'Mob("Zombie",2,4,[],[bite],{"on hurt":undead},[],"undead","cavern","blue",r"Sprites\Zombie.png",(0,0),r"Cut Sprites\Zombie.png",[(987,512,1323,579)])'
 #Mob()
 
-decklist={elder:20,zombie:20}
+decklist={zombie:20, elder:20}
 #playername=input("Enter your name: ")
 playername="J1"
 player1=Player(playername,1,(fields_anchor[0],y_rails[1]+cut_dim[1]+card_spacing_y),[(x_rails[0],y_rails[1]),(x_rails[1],y_rails[1]),(x_rails[2],y_rails[1])])
-player2=''
+player2:Player=''
 
 screen=display.set_mode(window_dim)
 display.set_caption("Minecards")
 
 font.init()
-font=font.Font("mojangles.ttf",40)
-beta_text=font.render("Closed Beta",True,(255,100,0))
-host_text=ClickableText(font,"Create Game",(0,0,0),(window_dim[0]/2-font.size("Create Game")[0]/2,550))
-connect_text=ClickableText(font,"Join Game",(0,0,0),(window_dim[0]/2-font.size("Join Game")[0]/2,650))
-connecting_text=font.render("Waiting for connection",True,(255,0,0))
-ip_enter_text=font.render("Enter host IPv4",True,(0,0,0))
-ip_submit_text=ClickableText(font,"Connect",(0,0,0),(window_dim[0]/2-font.size("Connect")[0]/2,750))
-pregame_text=font.render("Loading...",True,(0,0,0))
-retry_text=font.render("Retry Connection",True,(255,0,0))
-game_plc_text=font.render("Await further programming",True,(0,0,0))
+mjgs=font.Font("mojangles.ttf",40)
+small_font=font.Font("mojangles.ttf",20)
+beta_text=mjgs.render("Closed Beta",True,(255,100,0))
+host_text=ClickableText(mjgs,"Create Game",(0,0,0),(window_dim[0]/2-mjgs.size("Create Game")[0]/2,550))
+connect_text=ClickableText(mjgs,"Join Game",(0,0,0),(window_dim[0]/2-mjgs.size("Join Game")[0]/2,650))
+connecting_text=mjgs.render("Waiting for connection",True,(255,0,0))
+ip_enter_text=mjgs.render("Enter host IPv4",True,(0,0,0))
+ip_submit_text=ClickableText(mjgs,"Connect",(0,0,0),(window_dim[0]/2-mjgs.size("Connect")[0]/2,750))
+pregame_text=mjgs.render("Loading...",True,(0,0,0))
+retry_text=mjgs.render("Retry Connection",True,(255,0,0))
+game_plc_text=mjgs.render("Await further programming",True,(0,0,0))
 
 while running:
     screen.blit(background,(0,0))
@@ -360,18 +365,30 @@ while running:
                     if card.rect.collidepoint(pos) and card.current_sprite != card.back_sprite:
                         selected=card
                 if move_hovering_over != None:
-                    if move_hovering_over[0].collidepoint(pos):
+                    if move_hovering_over[0].collidepoint(pos) and player1.field.index(selected) == subturn-1:
                         selected_move=move_hovering_over[1]
                         attack_progressing=True
+                for i in range(3):
+                    if selected in player1.hand and player1.field[i] == None and Rect(player1.field_pos[i],cut_dim).collidepoint(pos):
+                        if selected.cost <= player1.souls:
+                            player1.add_to_field(player1.hand.index(selected),i+1)
+                        else:
+                            markers["not enough souls"]=[6,5,0,0] #[amount of cycles,frames per cycle,current colour,frame number]
 
             if attack_progressing:
                 for card in player2.field:
                     if card != None and  card.rect.collidepoint(pos):
                         target=card
                         counter=selected_move(selected,target,player1)
+                        other_counter=target.moveset[0](target,selected,player2,True)
                         #selected.startmove([(target.rect.x,target.rect.y),(selected.rect.x,selected.rect.y)],[10,10])
-                        if counter == True:
+                        if counter == True or counter == other_counter:
                             card.moveset[0](target,selected,player2)
+                        subturn += 1
+                        if subturn != 4:
+                            selected = player1.field[subturn-1]
+                        else:
+                            selected=player1.field[0]
                         attack_progressing=False
                         selected_move=None
                         move_hovering_over=None
@@ -387,12 +404,12 @@ while running:
 
     if state == "menu":
         screen.blit(title_img,(window_dim[0]/2-421,165))
-        screen.blit(beta_text,(window_dim[0]/2-font.size("Closed Beta")[0]/2,320))
+        screen.blit(beta_text,(window_dim[0]/2-mjgs.size("Closed Beta")[0]/2,320))
         if connect_state == "idle":
             screen.blit(host_text.text, host_text.position)
             screen.blit(connect_text.text, connect_text.position)
         elif connect_state == "hosting":
-            screen.blit(connecting_text,(window_dim[0]/2-font.size("Waiting for connection")[0]/2,600))
+            screen.blit(connecting_text,(window_dim[0]/2-mjgs.size("Waiting for connection")[0]/2,600))
             display.update()
             sock= socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -408,15 +425,15 @@ while running:
         elif connect_state == "connecting":
             sock= socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            screen.blit(ip_enter_text, (window_dim[0]/2-font.size("Enter Host IPv4")[0]/2,550))
+            screen.blit(ip_enter_text, (window_dim[0]/2-mjgs.size("Enter Host IPv4")[0]/2,550))
             draw.rect(screen,(255,255,255),Rect(300,625,900,100))
-            screen.blit(font.render(HOST,True,(0,0,0)),(325,650))
+            screen.blit(mjgs.render(HOST,True,(0,0,0)),(325,650))
             screen.blit(ip_submit_text.text, ip_submit_text.position)
             if markers["retry"] == True:
-                screen.blit(retry_text,(window_dim[0]/2-font.size("Retry Connection")[0]/2,400))
+                screen.blit(retry_text,(window_dim[0]/2-mjgs.size("Retry Connection")[0]/2,400))
 
     elif state == "pregame":
-        screen.blit(pregame_text,(window_dim[0]/2-font.size("Loading...")[0]/2,window_dim[1]/2))
+        screen.blit(pregame_text,(window_dim[0]/2-mjgs.size("Loading...")[0]/2,window_dim[1]/2))
         if sock in read_ready:
             t.sleep(1)
             player2name=sock.recv(4096).decode()
@@ -427,32 +444,50 @@ while running:
             sock.send(playername.encode())
 
     elif state == "game":
-        if not markers["start of turn called"]:
-            start_of_turn()
-            markers["start of turn called"]=True
-        if not markers["do not connect"]:
-            screen.blit(game_plc_text,(window_dim[0]/2-font.size("Await further programming")[0]/2,window_dim[1]/2))
         if markers["deck built"] == False:
+            turn = 1
             deck = deckbuilder(decklist)
             for i in range(3):
                 player1.hand.append(deck.pop())
+                player2.hand.append(deck.pop())
+                player1.add_to_field(0,i+1,True)
+                player2.add_to_field(0,i+1,True)
+            for i in range(starting_cards):
                 player1.hand.append(deck.pop())
                 player2.hand.append(deck.pop())
-                player2.hand.append(deck.pop())
-                player1.add_to_field(0,i+1)
-                player2.add_to_field(0,i+1)
             markers["deck built"]=True
+        if not markers["start of turn called"] and turn != 1:
+            player1.souls += turn
+            player2.souls += turn
+            for i in range(drawing_cards):
+                player1.hand.append(deck.pop())
+                player2.hand.append(deck.pop())
+            start_of_turn()
+            markers["start of turn called"]=True
+        if not markers["do not connect"]:
+            screen.blit(game_plc_text,(window_dim[0]/2-mjgs.size("Await further programming")[0]/2,window_dim[1]/2))
         screen.blit(deck_plc.current_sprite,(deck_plc.rect.x,deck_plc.rect.y))
         if selected != None:
             large_image=transform.scale(image.load(selected.original_sprite),(card_dim[0]*3,card_dim[1]*3))
             test=draw.rect(screen,ORANGE,Rect(selected.rect.x-5,selected.rect.y-5,selected.rect.width+10,selected.rect.height+10),5)
             screen.blit(large_image,(930,100))
+            for i in range(3):
+                if player1.field[i] == None:
+                    temp=Rect(player1.field_pos[i],cut_dim)
+                    draw.rect(screen,ORANGE,temp,5)
+                    draw.rect(screen,(255,255,255),Rect(temp.centerx-20,temp.centery-5,40,10))
+                    draw.rect(screen,(255,255,255),Rect(temp.centerx-5,temp.centery-20,10,40))
+        if subturn == 4:
+            subturn = 1
+            turn += 1
+            end_of_turn()
+            markers["start of turn called"] = False
         player1.update()
         player2.update()
 
     display.update()
     clock.tick(FPS)
-    print(clock.get_fps())
+    #print(clock.get_fps())
 
     '''
     To-do:
@@ -466,6 +501,7 @@ while running:
     4. Add moves and passives for Mobs and effects for Items
     5. Impement combat loop and turn ends and starts
     6. Figure out why movement is so choppy
+    7. Add some sort of subturn indicator, perhaps highlight around card expected to attack
 
     Sequence for adding to field:
     1. Click on card in hand: detected using card.rect.collidepoint(mouse position)
