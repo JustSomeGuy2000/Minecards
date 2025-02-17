@@ -12,11 +12,12 @@ type Card = Mob|Item
 type Coord = tuple[int|float,int|float]
 type Size = tuple[int,int]
 type Path = str
+type Attack_params = dict[Literal["origin"]:Card,Literal["target"]:Card,Literal["damage"]:int,Literal["noattack"]:bool]
 #Name:LAPTOP-20C14P7N, Address:172.20.57.66
 #None values mean add later
 
 class Mob(sprite.Sprite):
-    def __init__(self,name:str,cost:int,health:int,abilities:list[Callable],attacks:list[Callable],passives:dict[Literal["end of turn","start of turn","on death","on hurt","when played"],Callable],items:list[Item],mob_class:Literal["undead","arthropod","aquatic","human","misc"],biome:Literal["plains","cavern","ocean","swamp"],border:Literal["blue","pink"],sprite:Path,init_pos:Coord,cut_sprite:Path,move_positions:list[tuple[int,int,int,int]]):
+    def __init__(self,name:str,cost:int,health:int,abilities:list[Callable],attacks:list[Callable],passives:dict[Literal["end of turn","start of turn","on death","on hurt","on attack","when played"],Callable],items:dict[Literal["end of turn","start of turn","on death","on hurt","on attack","when played"],Item],mob_class:Literal["undead","arthropod","aquatic","human","misc"],biome:Literal["plains","cavern","ocean","swamp"],border:Literal["blue","pink"],sprite:Path,init_pos:Coord,cut_sprite:Path,move_positions:list[tuple[int,int,int,int]]):
         super().__init__()
         #MOB INFO
         self.name=name
@@ -78,6 +79,9 @@ class Mob(sprite.Sprite):
                 move_hovering_over=(position,self.moveset[self.move_positions.index(position)])
         if attack_progressing:
             draw.rect(screen,ORANGE,move_hovering_over[0],5)
+        for item in self.items:
+            if len(self.items) >= 2:
+                self.items[item].rect.x, self.items[item].rect.y= (self.rect.x+cut_dim[0]*2/3, self.rect.y+item_dim[1]*list(self.items.keys()).index(item))
         screen.blit(self.current_sprite, (self.rect.x,self.rect.y))
 
     def switch_sprite(self,final:Literal["front","back","cut"]):
@@ -90,13 +94,15 @@ class Mob(sprite.Sprite):
         self.rect=self.current_sprite.get_rect()
 
 class Item(sprite.Sprite):
-    def __init__(self,name:str,cost:int,effect:Callable,sprite:Path,init_pos:Coord,cut_sprite:Path,border:Literal["blue","pink"],dimensions:Size):
+    def __init__(self,name:str,cost:int,effect:Callable,sprite:Path,init_pos:Coord,cut_sprite:Path,border:Literal["blue","pink"],dimensions:Size,condition:Literal["end of turn","start of turn","on death","on hurt","on attack","when played"],uses:int):
         #ITEM INFO
         self.name=name
         self.cost=cost
         self.health=0
         self.effect=effect #a function that takes in a value and changes it appropriately
         self.border=border
+        self.condition=condition #when the item activates
+        self.uses=uses
         #SPRITE AND COORDS
         self.front_sprite=transform.scale(image.load(sprite),dimensions)
         self.original_sprite=sprite
@@ -106,6 +112,7 @@ class Item(sprite.Sprite):
         self.rect=self.current_sprite.get_rect()
         self.rect.x=init_pos[0]
         self.rect.y=init_pos[1]
+        self.display_rect=Rect(930,100,card_dim[0]*3,card_dim[1]*3)
         #MOVEMENT
         self.timer=0
         self.movement_phase=0
@@ -121,6 +128,7 @@ class Item(sprite.Sprite):
             self.velocity=((self.destinations[self.movement_phase][0]-self.rect.x)/self.timer, (self.destinations[self.movement_phase][1]-self.rect.y)/self.timer)
 
     def update(self):
+        global move_hovering_over
         if self.timer!=0:
             self.rect.x+=self.velocity[0]
             self.rect.y+=self.velocity[1]
@@ -132,6 +140,11 @@ class Item(sprite.Sprite):
         else:
             self.destinations=[]
             self.times=[]
+        if attack_progressing and selected == self:
+            draw.rect(screen,ORANGE,Rect(self.display_rect.left-5,self.display_rect.top-5,self.display_rect.width,self.display_rect.height),5)
+        if selected == self and self.display_rect.collidepoint(mouse.get_pos()) and not attack_progressing:
+            draw.rect(screen,ORANGE,Rect(self.display_rect.left-5,self.display_rect.top-5,self.display_rect.width,self.display_rect.height),5)
+            move_hovering_over=(self.display_rect,self.effect)
         screen.blit(self.current_sprite, (self.rect.x,self.rect.y))
 
     def switch_sprite(self, final:Literal["front","back","cut"]):
@@ -142,7 +155,6 @@ class Item(sprite.Sprite):
         elif final== "cut":
             self.current_sprite=self.cut_sprite
         self.rect=self.current_sprite.get_rect()
-
 
 class Player():
     def __init__(self,name:str,player_number:int,hand_pos:Coord,field_pos:list[Coord]):
@@ -175,6 +187,8 @@ class Player():
                 if card.health <= 0:
                     if "on death" in card.passives:
                         card.passives["on_death"]()
+                    if "on death" in card.items:
+                        card.items["on death"]()
                     self.field[self.field.index(card)]=None
         screen.blit(soul,self.souls_pos)
         screen.blit(mjgs.render(str(self.souls),True,tuple(self.soul_colour)),(self.souls_pos[0]+token_dim[0]+5,self.souls_pos[1]-2))
@@ -195,13 +209,19 @@ class Player():
                     markers["not enough souls"][2] = 1
                 markers["not enough souls"][0] -= 1
 
-    def add_to_field(self,card:int,pos:int,ignore_cost:bool=False): #card is index number of hand card to take, pos is field position to take
+    def add_to_field(self,card:int,pos:int,ignore_cost:bool=False): #card is index number of hand card to take, pos is field position to take (in human number terms, not list index)
         target=self.hand.pop(card)
-        self.field[pos-1]=target
-        target.switch_sprite("cut")
-        target.rect.x, target.rect.y=self.field_pos[pos-1]
-        if not ignore_cost:
-            self.souls -= target.cost
+        if type(target) == Mob:
+            self.field[pos-1]=target
+            target.switch_sprite("cut")
+            target.rect.x, target.rect.y=self.field_pos[pos-1]
+            if not ignore_cost:
+                self.souls -= target.cost
+        elif type(target) == Item and self.field[pos-1] != None:
+            self.field[pos-1].items[target.condition]=target
+            target.switch_sprite("cut")
+            if not ignore_cost:
+                self.souls -= target.cost
 
 class ClickableText():
     def __init__(self,font,text:str,colour:tuple[int,int,int],position:Coord):
@@ -223,38 +243,55 @@ def deckbuilder(list_to_use:dict[Card,int]) -> list[Card]:
     r.shuffle(here_deck)
     return here_deck
 
-def warding_laser(origin:Mob, target:Mob, player:Player, noattack=False) -> bool:
-    if noattack == False:
+def warding_laser(**kwargs:Attack_params) -> Literal[False]:
+    if kwargs["noattack"] == False:
         opp=None
-        if player.player_number == 1:
+        if kwargs["player"].player_number == 1:
             opp=player2
         else:
             opp=player1
-        dmg=abs(opp.field.index(target)-player.field.index(origin))+1
-        target.health-=dmg
-        if "on hurt" in target.passives:
-            target.passives["on hurt"](origin,target,dmg)
+        dmg=abs(opp.field.index(kwargs["target"])-kwargs["player"].field.index(kwargs["origin"]))+1
+        kwargs["target"].health-=dmg
+        if "on hurt" in kwargs["target"].passives:
+            kwargs["target"].passives["on hurt"](origin=kwargs["origin"],target=kwargs["target"],damage=dmg)
     return False
 
-def bite(origin:Mob, target:Mob, player:Player, noattack=False) -> bool:
-    if noattack == False:
-        target.health-=2
-        if "on hurt" in target.passives:
-            target.passives["on hurt"](origin,target,2)
+def bite(**kwargs:Attack_params) -> Literal[True]:
+    if kwargs["noattack"] == False:
+        kwargs["target"].health-=2
+        if "on hurt" in kwargs["target"].passives:
+            kwargs["target"].passives["on hurt"](origin=kwargs["origin"],target=kwargs["target"],damage=2)
     return True
 
-def elders_curse(): #end of turn
-    pass
+def elders_curse(**kwargs): #end of turn
+    global selected
+    global selected_move
+    global attack_progressing
+    global move_hovering_over
+    if kwargs["player"] == player1:
+        selected=kwargs["origin"]
+        selected_move=kwargs["origin"].moveset[0]
+        attack_progressing=True
+        move_hovering_over=(kwargs["origin"].move_positions[0],kwargs["origin"].moveset[0])
 
-def undead(origin:Mob,target:Mob,damage:int): #on hurt
-    if origin.health == origin.max_health and damage >= origin.health:
-        origin.health=1
+def undead(**kwargs): #on hurt
+    if kwargs["origin"].health == kwargs["origin"].max_health and kwargs["damage"] >= kwargs["origin"].health:
+        kwargs["origin"].health=1
+
+def sword_slash(**kwargs):
+    kwargs["target"].health -= 1
 
 def start_of_turn():
-    pass
-
-def end_of_turn():
-    pass
+    for card in player1.field:
+        if card != None and "start of turn" in card.passives:
+            card.passives["start of turn"]()
+        if card != None and "start of turn" in card.items:
+            card.items["start of turn"].effect()
+    for card in player2.field:
+        if card != None and "start of turn" in card.passives:
+            card.passives["start of turn"]()
+        if card != None and "start of turn" in card.items:
+            card.items["start of turn"].effect()
 
 window_dim=(1500,850)
 title_img=transform.scale(image.load("title.png"),(842,120))
@@ -274,7 +311,8 @@ clock=time.Clock()
 background=transform.scale(image.load("background.png"),window_dim)
 deck=[]
 turn=0
-subturn=1
+subturn=1 #subturn numbers start from 1
+postsubturn=1 #postsubturn numbers start from 2
 cardback="card_back.png"
 attack_choosing_state=False
 HOST=''
@@ -288,7 +326,7 @@ card_spacing_y=50
 y_rails=[fields_anchor[1],fields_anchor[1]+card_spacing_y*2+card_dim_rot[1]+cut_dim[1]]
 x_rails=[fields_anchor[0],fields_anchor[0]+cut_dim[0]+card_spacing_x,fields_anchor[0]+cut_dim[0]*2+card_spacing_x*2]
 hearts_rails=[y_rails[0]+cut_dim[0]+10,y_rails[1]-10-20] #0: player 2, 1: player 1
-markers={"retry":False, "deck built":False, "do not connect":True, "start of turn called":False, "not enough souls":[0,0,0]}
+markers={"retry":False, "deck built":False, "do not connect":True, "start of turn called":False, "not enough souls":[0,0,0,0]}
 selected=None #card displayed on the side
 selected_move=None #move that has been selected
 attack_progressing=False #is it the attack target choosing stage
@@ -297,13 +335,14 @@ move_hovering_over=None #tuple of Rect of attack being hovered over and attack f
 #define cards here
 #Note: cards for deck use are defined by deckbuilder(), which takes these strings and eval()s them into objects
 #This is so each deck entry has a separate memory value
-deck_plc=Item("Deck Placeholder",0,None,"card_back_rot.png",(100,262),"card_back_rot.png",None,card_dim_rot)
-milk=r'Item("Milk",2,None,r"Sprites\Milk.png",(0,0),r"Cut Sprites\Milk.png","blue",card_dim)'
-elder=r'Mob("Elder",6,6,[],[warding_laser],{"end of turn":elders_curse},[],"aquatic","ocean","pink",r"Sprites\Elder.png",(0,0),r"Cut Sprites\Elder.png",[(987,522,1323,589)])'
-zombie=r'Mob("Zombie",2,4,[],[bite],{"on hurt":undead},[],"undead","cavern","blue",r"Sprites\Zombie.png",(0,0),r"Cut Sprites\Zombie.png",[(987,512,1323,579)])'
+deck_plc=Item("Deck Placeholder",0,None,"card_back_rot.png",(100,262),"card_back_rot.png",None,card_dim_rot,'',None)
+milk=r'Item("Milk",2,None,r"Sprites\Milk.png",(0,0),r"Cut Sprites\Milk.png","blue",card_dim,"when played",1)'
+sword=r'Item("Sword",1,sword_slash,r"Sprites\Sword.png",(0,0),r"Cut Sprites\Sword.png","blue",card_dim,"on attack",1)'
+elder=r'Mob("Elder",6,6,[],[warding_laser],{"end of turn":elders_curse},{},"aquatic","ocean","pink",r"Sprites\Elder.png",(0,0),r"Cut Sprites\Elder.png",[(987,522,1323,589)])'
+zombie=r'Mob("Zombie",2,4,[],[bite],{"on hurt":undead},{},"undead","cavern","blue",r"Sprites\Zombie.png",(0,0),r"Cut Sprites\Zombie.png",[(987,512,1323,579)])'
 #Mob()
 
-decklist={zombie:20, elder:20}
+decklist={zombie:15, elder:15, sword:15}
 #playername=input("Enter your name: ")
 playername="J1"
 player1=Player(playername,1,(fields_anchor[0],y_rails[1]+cut_dim[1]+card_spacing_y),[(x_rails[0],y_rails[1]),(x_rails[1],y_rails[1]),(x_rails[2],y_rails[1])])
@@ -365,33 +404,57 @@ while running:
                     if card.rect.collidepoint(pos) and card.current_sprite != card.back_sprite:
                         selected=card
                 if move_hovering_over != None:
-                    if move_hovering_over[0].collidepoint(pos) and player1.field.index(selected) == subturn-1:
+                    if type(selected) == Mob and move_hovering_over[0].collidepoint(pos) and player1.field.index(selected) == subturn-1:
+                        selected_move=move_hovering_over[1]
+                        attack_progressing=True
+                    if type(selected) == Item and move_hovering_over[0].collidepoint(pos):
                         selected_move=move_hovering_over[1]
                         attack_progressing=True
                 for i in range(3):
                     if selected in player1.hand and player1.field[i] == None and Rect(player1.field_pos[i],cut_dim).collidepoint(pos):
-                        if selected.cost <= player1.souls:
+                        if selected.cost <= player1.souls and type(selected) == Mob:
                             player1.add_to_field(player1.hand.index(selected),i+1)
                         else:
-                            markers["not enough souls"]=[6,5,0,0] #[amount of cycles,frames per cycle,current colour,frame number]
+                            if markers["not enough souls"][0] == 0:
+                                markers["not enough souls"]=[6,5,0,0] #[amount of cycles,frames per cycle,current colour,frame number]
 
             if attack_progressing:
                 for card in player2.field:
-                    if card != None and  card.rect.collidepoint(pos):
+                    if card != None and card.rect.collidepoint(pos):
                         target=card
-                        counter=selected_move(selected,target,player1)
-                        other_counter=target.moveset[0](target,selected,player2,True)
+                        counter=selected_move(origin=selected,target=target,player=player1,noattack=False)
+                        other_counter=target.moveset[0](origin=target,target=selected,player=player2,noattack=True)
+                        if "on attack" in selected.items:
+                            card.items["on attack"].effect(origin=selected,target=target,player=player1)
+                            card.items["on attack"].uses -= 1
+                            if card.items["on attack"].uses == 0:
+                                card.items["on attack"] = None
                         #selected.startmove([(target.rect.x,target.rect.y),(selected.rect.x,selected.rect.y)],[10,10])
                         if counter == True or counter == other_counter:
-                            card.moveset[0](target,selected,player2)
-                        subturn += 1
+                            card.moveset[0](origin=target,target=selected,player=player2,noattack=False)
+                            if "on attack" in target.items:
+                                target.items["on attack"].effect(origin=target,target=selected,player=player2)
+                                target.items["on attack"].uses -= 1
+                                if target.items["on attack"].uses == 0:
+                                    target.items["on attack"] = None
+                        if postsubturn == 1:
+                            subturn += 1
                         if subturn != 4:
                             selected = player1.field[subturn-1]
                         else:
                             selected=player1.field[0]
+                            postsubturn += 1
                         attack_progressing=False
                         selected_move=None
                         move_hovering_over=None
+                if type(selected) == Item:
+                    for card in player1.field:
+                        if card != None and card.rect.collidepoint(pos):
+                            player1.add_to_field(player1.hand.index(selected),player1.field.index(card)+1)
+                            attack_progressing=False
+                            selected_move=None
+                            move_hovering_over=None
+                            subturn+=1
         
         elif e.type==KEYDOWN:
             if e.key==K_p:
@@ -477,11 +540,25 @@ while running:
                     draw.rect(screen,ORANGE,temp,5)
                     draw.rect(screen,(255,255,255),Rect(temp.centerx-20,temp.centery-5,40,10))
                     draw.rect(screen,(255,255,255),Rect(temp.centerx-5,temp.centery-20,10,40))
-        if subturn == 4:
+        if postsubturn >= 2:
+            skippost=True
+            if player1.field[postsubturn-2] != None and "end of turn" in player1.field[postsubturn-2].passives:
+                player1.field[postsubturn-2].passives["end of turn"](origin=player1.field[postsubturn-2],player=player1)
+                skippost=False
+            if player1.field[postsubturn-2] != None and "end of turn" in player1.field[postsubturn-2].items:
+                player1.field[postsubturn-2].items["end of turn"].effect(origin=player1.field[postsubturn-2],player=player1)
+                skippost=False
+            if skippost:
+                postsubturn += 1
+        if postsubturn >= 4:
             subturn = 1
+            postsubturn = 1
             turn += 1
-            end_of_turn()
             markers["start of turn called"] = False
+        if postsubturn == 1:
+            draw.rect(screen,(255,255,255),Rect(player1.field_pos[subturn-1][0],player1.field_pos[subturn-1][1]+cut_dim[1]+10,cut_dim[0],10))
+        else:
+            draw.rect(screen,(255,255,255),Rect(player1.field_pos[postsubturn-2][0],player1.field_pos[postsubturn-2][1]+cut_dim[1]+10,cut_dim[0],10))
         player1.update()
         player2.update()
 
@@ -501,7 +578,8 @@ while running:
     4. Add moves and passives for Mobs and effects for Items
     5. Impement combat loop and turn ends and starts
     6. Figure out why movement is so choppy
-    7. Add some sort of subturn indicator, perhaps highlight around card expected to attack
+    7. Add start of turn animations
+    8. Implement applying items onto mobs (works kinda)
 
     Sequence for adding to field:
     1. Click on card in hand: detected using card.rect.collidepoint(mouse position)
@@ -524,4 +602,7 @@ while running:
     "end of turn": Called at the end of the attack phase (not yet implemented)
     "start of turn": Called at the start of the turn, in the function start_of_turn()
     "on death": Called when health is 0
+
+    Standard arguments for moves, passives, item effects, etc.:
+    Callable(origin:Card that calls it, target:target card, player:player the card belongs to, noattack:only used in moves, if True only returns if it is ranged or not)
     '''
