@@ -269,7 +269,7 @@ def elders_curse(**kwargs): #end of turn
     global selected_move
     global attack_progressing
     global move_hovering_over
-    if kwargs["player"] == player1:
+    if kwargs["player"] == player1 and kwargs["origin"] in player1.field:
         selected=kwargs["origin"]
         selected_move=kwargs["origin"].moveset[0]
         attack_progressing=True
@@ -329,7 +329,7 @@ card_spacing_y=50
 y_rails=[fields_anchor[1],fields_anchor[1]+card_spacing_y*2+card_dim_rot[1]+cut_dim[1]]
 x_rails=[fields_anchor[0],fields_anchor[0]+cut_dim[0]+card_spacing_x,fields_anchor[0]+cut_dim[0]*2+card_spacing_x*2]
 hearts_rails=[y_rails[0]+cut_dim[0]+10,y_rails[1]-10-20] #0: player 2, 1: player 1
-markers={"retry":False, "deck built":False, "do not connect":True, "start of turn called":False, "not enough souls":[0,0,0,0], "data received, proceed":False}
+markers={"retry":False, "deck built":False, "do not connect":True, "start of turn called":False, "not enough souls":[0,0,0,0], "data received, proceed":False, "just chose":False, "finishable":False}
 selected=None #card displayed on the side
 selected_move=None #move that has been selected
 attack_progressing=False #is it the attack target choosing stage
@@ -418,15 +418,17 @@ while running:
                     if type(selected) == Mob and move_hovering_over[0].collidepoint(pos) and player1.field.index(selected) == subturn-1:
                         selected_move=move_hovering_over[1]
                         attack_progressing=True
+                        markers["just chose"]=True
                     if type(selected) == Item and move_hovering_over[0].collidepoint(pos) and selected in player1.hand:
                         selected_move=move_hovering_over[1]
                         attack_progressing=True
+                        markers["just chose"]=True
                 for i in range(3):
                     if selected in player1.hand and player1.field[i] == None and Rect(player1.field_pos[i],cut_dim).collidepoint(pos):
                         if selected.cost <= player1.souls and type(selected) == Mob:
                             player1.add_to_field(player1.hand.index(selected),i+1)
                             if setup == True:
-                                subturn += 1
+                                abs_subturn += 1
                         else:
                             if markers["not enough souls"][0] == 0 and min(hand_cost) >= player1.souls:
                                 markers["not enough souls"]=[6,5,0,0] #[amount of cycles,frames per cycle,current colour,frame number]
@@ -452,8 +454,8 @@ while running:
                                     if target.items["on attack"].uses == 0:
                                         target.items["on attack"] = None
                             if postsubturn == 1 and setup == False:
-                                subturn += 1
-                            if subturn != 4:
+                                abs_subturn += 1
+                            if abs_subturn != 4:
                                 selected = player1.field[subturn-1]
                             else:
                                 selected=player1.field[0]
@@ -462,13 +464,24 @@ while running:
                             selected_move=None
                             move_hovering_over=None
                 if type(selected) == Item:
-                    for card in player1.field and setup == False:
-                        if card != None and card.rect.collidepoint(pos):
-                            player1.add_to_field(player1.hand.index(selected),player1.field.index(card)+1)
-                            attack_progressing=False
+                    for card in player1.field:
+                        if card != None and card.rect.collidepoint(pos) and setup == False:
+                            if not selected.cost > player1.souls:
+                                player1.add_to_field(player1.hand.index(selected),player1.field.index(card)+1)
+                                attack_progressing=False
+                                selected_move=None
+                                move_hovering_over=None
+                                abs_subturn += 1
+                            else:
+                                if markers["not enough souls"][0] == 0:
+                                    markers["not enough souls"]=[6,5,0,0]
+                if not markers["just chose"]:
+                    for card in player2.field:
+                        if not(card != None and card.rect.collidepoint(pos) and setup == False):
                             selected_move=None
                             move_hovering_over=None
-                            subturn+=1
+                            attack_progressing=False
+                markers["just chose"]=False
         
         elif e.type==KEYDOWN:
             if e.key==K_p:
@@ -546,12 +559,12 @@ while running:
             large_image=transform.scale(image.load(selected.original_sprite),(card_dim[0]*3,card_dim[1]*3))
             test=draw.rect(screen,ORANGE,Rect(selected.rect.x-5,selected.rect.y-5,selected.rect.width+10,selected.rect.height+10),5)
             screen.blit(large_image,(930,100))
-            for i in range(3):
-                if player1.field[i] == None:
-                    temp=Rect(player1.field_pos[i],cut_dim)
-                    draw.rect(screen,ORANGE,temp,5)
-                    draw.rect(screen,(255,255,255),Rect(temp.centerx-20,temp.centery-5,40,10))
-                    draw.rect(screen,(255,255,255),Rect(temp.centerx-5,temp.centery-20,10,40))
+        for i in range(3):
+            if player1.field[i] == None and type(selected) != Item:
+                temp=Rect(player1.field_pos[i],cut_dim)
+                draw.rect(screen,ORANGE,temp,5)
+                draw.rect(screen,(255,255,255),Rect(temp.centerx-20,temp.centery-5,40,10))
+                draw.rect(screen,(255,255,255),Rect(temp.centerx-5,temp.centery-20,10,40))
         if postsubturn >= 2:
             skippost=True
             if player1.field[postsubturn-2] != None and "end of turn" in player1.field[postsubturn-2].passives:
@@ -566,24 +579,40 @@ while running:
         for card in player1.hand:
             if type(card) == Mob:
                 hand_cost.append(card.cost)
+            else:
+                hand_cost.append(99)
         if min(hand_cost) >= player1.souls and setup == True:
-            subturn += 1
+            abs_subturn += 1
         if postsubturn >= 4 and setup == False:
             subturn = 1
+            abs_subturn = 1
             postsubturn = 1
             turn += 1
             markers["start of turn called"] = False
-        if subturn >= 4 and setup == True:
+        if abs_subturn >= 4 and setup == True:
             setup=False
             subturn=1
+            abs_subturn=1
             player1.souls=1
             player2.souls=1
+        filled_positions={}
+        for i in range(len(player1.field)):
+            if player1.field[i] != None:
+                filled_positions[i] = player1.field[i]
+        if len(filled_positions) > 0:
+            subturn=list(filled_positions.keys())[abs_subturn%len(filled_positions)]+1
         if postsubturn == 1:
             draw.rect(screen,(255,255,255),Rect(player1.field_pos[subturn-1][0],player1.field_pos[subturn-1][1]+cut_dim[1]+10,cut_dim[0],10))
         else:
             draw.rect(screen,(255,255,255),Rect(player1.field_pos[postsubturn-2][0],player1.field_pos[postsubturn-2][1]+cut_dim[1]+10,cut_dim[0],10))
         player1.update()
         player2.update()
+        for i in range(3):
+            if player1.field[i] != None and type(selected) == Item and selected in player1.hand:
+                temp=Rect(player1.field_pos[i],cut_dim)
+                draw.rect(screen,ORANGE,temp,5)
+                draw.rect(screen,(255,255,255),Rect(temp.centerx-20,temp.centery-5,40,10))
+                draw.rect(screen,(255,255,255),Rect(temp.centerx-5,temp.centery-20,10,40))
 
     display.update()
     clock.tick(FPS)
@@ -602,7 +631,7 @@ while running:
     5. Impement combat loop and turn ends and starts
     6. Add start of turn animations
     7. Implement applying items onto mobs (nearly done)
-    8. Implement pre-combat mob placing phase
+    8. Implement subturn indicator
 
     Sequence for adding to field:
     1. Click on card in hand: detected using card.rect.collidepoint(mouse position)
@@ -621,11 +650,11 @@ while running:
     7. Click on a targetable Mob: detected using collidepoint again
     8. Since attack_progressing is True, this calls the function from selectied_move and passes the current Mob and original Mob as the arguments
 
-    Passive conditions:
-    "end of turn": Called at the end of the attack phase (not yet implemented)
+    Conditions:
+    "end of turn": Called at the end of the attack phase
     "start of turn": Called at the start of the turn, in the function start_of_turn()
     "on death": Called when health is 0
-
-    Standard arguments for moves, passives, item effects, etc.:
-    Callable(origin:Card that calls it, target:target card, player:player the card belongs to, noattack:only used in moves, if True only returns if it is ranged or not)
+    "on hurt": Called when health decreases
+    "on attack": Called when this attacks
+    "when played": Called immediately
     '''
