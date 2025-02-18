@@ -224,6 +224,11 @@ class Player():
             if not ignore_cost:
                 self.souls -= target.cost
 
+    def reset(self):
+        self.hand=[]
+        self.field=[None, None, None]
+        self.souls=7
+
 class ClickableText():
     def __init__(self,font,text:str,colour:tuple[int,int,int],position:Coord):
         self.text=font.render(text,True,colour)
@@ -294,42 +299,46 @@ def start_of_turn():
         if card != None and "start of turn" in card.items:
             card.items["start of turn"].effect()
 
+#constants
 window_dim=(1500,850)
 title_img=transform.scale(image.load("title.png"),(842,120))
 card_dim=(150,225)
 card_dim_rot=(225,150)
 cut_dim=(169,172)
-item_dim=(75,75) #get back to this, change to better value
+item_dim=(75,75)
 token_dim=(30,30)
 soul=transform.scale(image.load("soul.png"),token_dim)
-starting_cards=5
-drawing_cards=2
-running=True
-state="menu"
-connect_state="idle"
-FPS=60
-clock=time.Clock()
-background=transform.scale(image.load("background.png"),window_dim)
-deck=[]
-turn=0
-setup=True
-subturn=1 #subturn numbers start from 1, keeps track of which card should be attacking
-abs_subturn=1 #keeps track of how many subturns have passed
-postsubturn=1 #postsubturn numbers start from 2
-cardback="card_back.png"
-attack_choosing_state=False
-HOST=''
-PORT=6543
 ORANGE = (255,180,0)
 SOUL_COLOUR=(255,255,255)
-sock=''
+starting_cards=5
+drawing_cards=2
+cardback="card_back.png"
+background=transform.scale(image.load("background.png"),window_dim)
+FPS=60
+clock=time.Clock()
 fields_anchor=(90,40)
 card_spacing_x=70
 card_spacing_y=50
 y_rails=[fields_anchor[1],fields_anchor[1]+card_spacing_y*2+card_dim_rot[1]+cut_dim[1]]
 x_rails=[fields_anchor[0],fields_anchor[0]+cut_dim[0]+card_spacing_x,fields_anchor[0]+cut_dim[0]*2+card_spacing_x*2]
 hearts_rails=[y_rails[0]+cut_dim[0]+10,y_rails[1]-10-20] #0: player 2, 1: player 1
-markers={"retry":False, "deck built":False, "do not connect":True, "start of turn called":False, "not enough souls":[0,0,0,0], "data received, proceed":False, "just chose":False, "finishable":False}
+game_overs=("win", "tie", "lose")
+PORT=6543
+
+#variables
+running=True
+state="menu"
+connect_state="idle"
+deck=[]
+turn=0
+setup=True
+subturn=1 #subturn numbers start from 1, keeps track of which card should be attacking
+abs_subturn=1 #keeps track of how many subturns have passed
+postsubturn=1 #postsubturn numbers start from 2
+attack_choosing_state=False
+HOST=''
+sock=''
+markers={"retry":False, "deck built":False, "do not connect":True, "start of turn called":False, "not enough souls":[0,0,0,0], "data received, proceed":False, "just chose":False, "finishable":True}
 selected=None #card displayed on the side
 selected_move=None #move that has been selected
 attack_progressing=False #is it the attack target choosing stage
@@ -357,6 +366,7 @@ display.set_caption("Minecards")
 font.init()
 mjgs=font.Font("mojangles.ttf",40)
 small_font=font.Font("mojangles.ttf",20)
+large_font=font.Font("mojangles.ttf",80)
 beta_text=mjgs.render("Closed Beta",True,(255,100,0))
 host_text=ClickableText(mjgs,"Create Game",(0,0,0),(window_dim[0]/2-mjgs.size("Create Game")[0]/2,550))
 connect_text=ClickableText(mjgs,"Join Game",(0,0,0),(window_dim[0]/2-mjgs.size("Join Game")[0]/2,650))
@@ -366,16 +376,24 @@ ip_submit_text=ClickableText(mjgs,"Connect",(0,0,0),(window_dim[0]/2-mjgs.size("
 pregame_text=mjgs.render("Loading...",True,(0,0,0))
 retry_text=mjgs.render("Retry Connection",True,(255,0,0))
 game_plc_text=mjgs.render("Await further programming",True,(0,0,0))
+win_text=large_font.render("You won!",True,(30,150,20))
+lose_text=large_font.render("You lost...",True,(255,0,0))
+skill_issue_text=small_font.render("skill issue",True,(255,255,255))
+tie_text=large_font.render("You tied!",True,(255,255,0))
+to_menu_text=ClickableText(mjgs,"Back to menu",(255,255,255),(window_dim[0]/2-mjgs.size("Back to menu")[0]/2,3*window_dim[1]/4))
 
 while running:
-    screen.blit(background,(0,0))
+    if state != "lose":
+        screen.blit(background,(0,0))
+    elif state == "lose":
+        screen.fill((0,0,0))
     if sock != '':
         read_ready, write_ready, error_ready=select.select([sock],[sock],[],0)
 
     for e in event.get():
         if e.type == QUIT:
             running=False
-        elif e.type == MOUSEBUTTONUP:
+        elif e.type == MOUSEBUTTONUP and state not in game_overs:
             pos=mouse.get_pos()
             if host_text.textrect.collidepoint(pos):
                 if markers["do not connect"]:
@@ -482,6 +500,28 @@ while running:
                             move_hovering_over=None
                             attack_progressing=False
                 markers["just chose"]=False
+
+        elif e.type == MOUSEBUTTONUP and state in game_overs:
+            pos = mouse.get_pos()
+            if to_menu_text.textrect.collidepoint(pos):
+                state = "menu"
+                connect_state="idle"
+                deck=[]
+                turn=0
+                setup=True
+                subturn=1
+                abs_subturn=1
+                postsubturn=1
+                attack_choosing_state=False
+                HOST=''
+                sock=''
+                markers={"retry":False, "deck built":False, "do not connect":True, "start of turn called":False, "not enough souls":[0,0,0,0], "data received, proceed":False, "just chose":False, "finishable":True}
+                selected=None
+                selected_move=None
+                attack_progressing=False
+                move_hovering_over=None
+                player2=''
+                player1.reset()
         
         elif e.type==KEYDOWN:
             if e.key==K_p:
@@ -613,6 +653,26 @@ while running:
                 draw.rect(screen,ORANGE,temp,5)
                 draw.rect(screen,(255,255,255),Rect(temp.centerx-20,temp.centery-5,40,10))
                 draw.rect(screen,(255,255,255),Rect(temp.centerx-5,temp.centery-20,10,40))
+        if markers["finishable"] and setup == False:
+            if player1.field == [None, None, None]:
+                state = "lose"
+            if player2.field == [None, None, None]:
+                state = "win"
+            if player1.field == [None, None, None] and player2.field == [None, None, None]:
+                state ="tie"
+
+    elif state == "lose":
+        screen.blit(lose_text,(window_dim[0]/2-large_font.size("You lost...")[0]/2,window_dim[1]/2-100))
+        screen.blit(skill_issue_text,(window_dim[0]/2-small_font.size("skill issue")[0]/2,window_dim[1]/2))
+        screen.blit(to_menu_text.text, to_menu_text.position)
+
+    elif state == "win":
+        screen.blit(win_text,(window_dim[0]/2-large_font.size("You won!")[0]/2,window_dim[1]/2-100))
+        screen.blit(to_menu_text.text, to_menu_text.position)
+
+    elif state == "tie":
+        screen.blit(tie_text,(window_dim[0]/2-large_font.size("You tied!")[0]/2,window_dim[1]/2-100))
+        screen.blit(to_menu_text.text, to_menu_text.position)
 
     display.update()
     clock.tick(FPS)
@@ -627,11 +687,12 @@ while running:
         iii. Send and receive data
         iv. Action phase, you attack, opponent counters, opponent attacks, you counter. Alternatively, a card is placed
     3. Figure out animations: card going from hand to field, card attacking
-    4. Add moves and passives for Mobs and effects for Items
-    5. Impement combat loop and turn ends and starts
+    4. Add Mobs and Items
+    5. Impement turn starts
     6. Add start of turn animations
-    7. Implement applying items onto mobs (nearly done)
+    7. Implement applying items onto mobs (nearly done) (specifically add "when played" and figure out milk)
     8. Implement subturn indicator
+    9. When game ends, background fades to black (lose) or green (otherwise), then text fades in
 
     Sequence for adding to field:
     1. Click on card in hand: detected using card.rect.collidepoint(mouse position)
