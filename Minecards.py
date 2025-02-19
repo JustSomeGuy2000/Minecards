@@ -338,7 +338,7 @@ postsubturn=1 #postsubturn numbers start from 2
 attack_choosing_state=False
 HOST=''
 sock=''
-markers={"retry":False, "deck built":False, "do not connect":True, "start of turn called":False, "not enough souls":[0,0,0,0], "data received, proceed":False, "just chose":False, "finishable":True}
+markers={"retry":False, "deck built":False, "do not connect":True, "start of turn called":False, "not enough souls":[0,0,0,0], "data received, proceed":False, "just chose":False, "finishable":True, "freeze":False, "fade":[0,0,0]}
 selected=None #card displayed on the side
 selected_move=None #move that has been selected
 attack_progressing=False #is it the attack target choosing stage
@@ -393,7 +393,7 @@ while running:
     for e in event.get():
         if e.type == QUIT:
             running=False
-        elif e.type == MOUSEBUTTONUP and state not in game_overs:
+        elif e.type == MOUSEBUTTONUP and state not in game_overs and not markers["freeze"]:
             pos=mouse.get_pos()
             if host_text.textrect.collidepoint(pos):
                 if markers["do not connect"]:
@@ -486,10 +486,16 @@ while running:
                         if card != None and card.rect.collidepoint(pos) and setup == False:
                             if not selected.cost > player1.souls:
                                 player1.add_to_field(player1.hand.index(selected),player1.field.index(card)+1)
+                                if postsubturn == 1 and setup == False:
+                                    abs_subturn += 1
+                                if abs_subturn != 4:
+                                    selected = player1.field[subturn-1]
+                                else:
+                                    selected=player1.field[0]
+                                    postsubturn += 1
                                 attack_progressing=False
                                 selected_move=None
                                 move_hovering_over=None
-                                abs_subturn += 1
                             else:
                                 if markers["not enough souls"][0] == 0:
                                     markers["not enough souls"]=[6,5,0,0]
@@ -515,7 +521,7 @@ while running:
                 attack_choosing_state=False
                 HOST=''
                 sock=''
-                markers={"retry":False, "deck built":False, "do not connect":True, "start of turn called":False, "not enough souls":[0,0,0,0], "data received, proceed":False, "just chose":False, "finishable":True}
+                markers={"retry":False, "deck built":False, "do not connect":True, "start of turn called":False, "not enough souls":[0,0,0,0], "data received, proceed":False, "just chose":False, "finishable":True, "freeze":False}
                 selected=None
                 selected_move=None
                 attack_progressing=False
@@ -647,32 +653,46 @@ while running:
             draw.rect(screen,(255,255,255),Rect(player1.field_pos[postsubturn-2][0],player1.field_pos[postsubturn-2][1]+cut_dim[1]+10,cut_dim[0],10))
         player1.update()
         player2.update()
-        for i in range(3):
-            if player1.field[i] != None and type(selected) == Item and selected in player1.hand:
-                temp=Rect(player1.field_pos[i],cut_dim)
-                draw.rect(screen,ORANGE,temp,5)
-                draw.rect(screen,(255,255,255),Rect(temp.centerx-20,temp.centery-5,40,10))
-                draw.rect(screen,(255,255,255),Rect(temp.centerx-5,temp.centery-20,10,40))
+        if attack_progressing:
+            for i in range(3):
+                if player1.field[i] != None and type(selected) == Item and selected in player1.hand:
+                    temp=Rect(player1.field_pos[i],cut_dim)
+                    draw.rect(screen,ORANGE,temp,5)
+                    draw.rect(screen,(255,255,255),Rect(temp.centerx-20,temp.centery-5,40,10))
+                    draw.rect(screen,(255,255,255),Rect(temp.centerx-5,temp.centery-20,10,40))
         if markers["finishable"] and setup == False:
             if player1.field == [None, None, None]:
                 state = "lose"
+                markers["freeze"]=True
             if player2.field == [None, None, None]:
                 state = "win"
+                markers["freeze"]=True
             if player1.field == [None, None, None] and player2.field == [None, None, None]:
                 state ="tie"
+                markers["freeze"]=True
+        #screen.blit(mjgs.render(f"{str(abs_subturn)}, {str(subturn)}",True,(255,255,255)),(0,0))
 
     elif state == "lose":
-        screen.blit(lose_text,(window_dim[0]/2-large_font.size("You lost...")[0]/2,window_dim[1]/2-100))
-        screen.blit(skill_issue_text,(window_dim[0]/2-small_font.size("skill issue")[0]/2,window_dim[1]/2))
-        screen.blit(to_menu_text.text, to_menu_text.position)
+        if markers["fade"] == [0,0,0]:
+            screen.blit(lose_text,(window_dim[0]/2-large_font.size("You lost...")[0]/2,window_dim[1]/2-100))
+            screen.blit(skill_issue_text,(window_dim[0]/2-small_font.size("skill issue")[0]/2,window_dim[1]/2))
+            screen.blit(to_menu_text.text, to_menu_text.position)
+        else:
+            pass
 
     elif state == "win":
-        screen.blit(win_text,(window_dim[0]/2-large_font.size("You won!")[0]/2,window_dim[1]/2-100))
-        screen.blit(to_menu_text.text, to_menu_text.position)
+        if markers["fade"] == [0,0,0]:
+            screen.blit(win_text,(window_dim[0]/2-large_font.size("You won!")[0]/2,window_dim[1]/2-100))
+            screen.blit(to_menu_text.text, to_menu_text.position)
+        else:
+            pass
 
     elif state == "tie":
-        screen.blit(tie_text,(window_dim[0]/2-large_font.size("You tied!")[0]/2,window_dim[1]/2-100))
-        screen.blit(to_menu_text.text, to_menu_text.position)
+        if markers["fade"] == [0,0,0]:
+            screen.blit(tie_text,(window_dim[0]/2-large_font.size("You tied!")[0]/2,window_dim[1]/2-100))
+            screen.blit(to_menu_text.text, to_menu_text.position)
+        else:
+            pass
 
     display.update()
     clock.tick(FPS)
