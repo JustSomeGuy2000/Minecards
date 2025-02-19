@@ -338,7 +338,7 @@ postsubturn=1 #postsubturn numbers start from 2
 attack_choosing_state=False
 HOST=''
 sock=''
-markers={"retry":False, "deck built":False, "do not connect":True, "start of turn called":False, "not enough souls":[0,0,0,0], "data received, proceed":False, "just chose":False, "finishable":True, "freeze":False, "fade":[0,0,0]}
+markers={"retry":False, "deck built":False, "do not connect":True, "start of turn called":False, "not enough souls":[0,0,0,0], "data received, proceed":False, "just chose":False, "finishable":True, "freeze":False, "fade":[0,[0,0,0],0,0,0], "game over called":False}
 selected=None #card displayed on the side
 selected_move=None #move that has been selected
 attack_progressing=False #is it the attack target choosing stage
@@ -383,10 +383,7 @@ tie_text=large_font.render("You tied!",True,(255,255,0))
 to_menu_text=ClickableText(mjgs,"Back to menu",(255,255,255),(window_dim[0]/2-mjgs.size("Back to menu")[0]/2,3*window_dim[1]/4))
 
 while running:
-    if state != "lose":
-        screen.blit(background,(0,0))
-    elif state == "lose":
-        screen.fill((0,0,0))
+    screen.blit(background,(0,0))
     if sock != '':
         read_ready, write_ready, error_ready=select.select([sock],[sock],[],0)
 
@@ -521,7 +518,7 @@ while running:
                 attack_choosing_state=False
                 HOST=''
                 sock=''
-                markers={"retry":False, "deck built":False, "do not connect":True, "start of turn called":False, "not enough souls":[0,0,0,0], "data received, proceed":False, "just chose":False, "finishable":True, "freeze":False}
+                markers={"retry":False, "deck built":False, "do not connect":True, "start of turn called":False, "not enough souls":[0,0,0,0], "data received, proceed":False, "just chose":False, "finishable":True, "freeze":False, "game over called":False}
                 selected=None
                 selected_move=None
                 attack_progressing=False
@@ -579,7 +576,7 @@ while running:
         if sock in write_ready:
             sock.send(playername.encode())
 
-    elif state == "game":
+    elif state == "game" or state in game_overs:
         if markers["deck built"] == False:
             turn = 1
             deck = deckbuilder(decklist)
@@ -660,39 +657,56 @@ while running:
                     draw.rect(screen,ORANGE,temp,5)
                     draw.rect(screen,(255,255,255),Rect(temp.centerx-20,temp.centery-5,40,10))
                     draw.rect(screen,(255,255,255),Rect(temp.centerx-5,temp.centery-20,10,40))
-        if markers["finishable"] and setup == False:
+        if markers["finishable"] and setup == False and not markers["game over called"]:
             if player1.field == [None, None, None]:
                 state = "lose"
                 markers["freeze"]=True
+                markers["fade"]=[60,[0,0,0],255,0,0] #duration in frames, final colour, final transparency, current transparency, transparency change per frame
+                markers["game over called"]=True
+                markers["fade"][4]=markers["fade"][2]/markers["fade"][0]
             if player2.field == [None, None, None]:
                 state = "win"
                 markers["freeze"]=True
+                markers["fade"]=[60,[10,140,50],255,0,0]
+                markers["fade"][4]=markers["fade"][2]/markers["fade"][0]
+                markers["game over called"]=True
             if player1.field == [None, None, None] and player2.field == [None, None, None]:
                 state ="tie"
                 markers["freeze"]=True
+                markers["fade"]=[60,[10,220,70],255,0,0]
+                markers["fade"][4]=markers["fade"][2]/markers["fade"][0]
+                markers["game over called"]=True
         #screen.blit(mjgs.render(f"{str(abs_subturn)}, {str(subturn)}",True,(255,255,255)),(0,0))
 
-    elif state == "lose":
-        if markers["fade"] == [0,0,0]:
+    colourval = markers["fade"][1]+[markers["fade"][3]]
+    temps=Surface(window_dim)
+    temps.set_alpha(markers["fade"][3])
+    temps.fill(markers["fade"][1])
+    screen.blit(temps,(0,0))
+    if state == "lose":
+        if markers["fade"][0] <= 0:
             screen.blit(lose_text,(window_dim[0]/2-large_font.size("You lost...")[0]/2,window_dim[1]/2-100))
             screen.blit(skill_issue_text,(window_dim[0]/2-small_font.size("skill issue")[0]/2,window_dim[1]/2))
             screen.blit(to_menu_text.text, to_menu_text.position)
         else:
-            pass
+            markers["fade"][0]-=1
+            markers["fade"][3]+=markers["fade"][4]
 
-    elif state == "win":
-        if markers["fade"] == [0,0,0]:
+    if state == "win":
+        if markers["fade"][0] <= 0:
             screen.blit(win_text,(window_dim[0]/2-large_font.size("You won!")[0]/2,window_dim[1]/2-100))
             screen.blit(to_menu_text.text, to_menu_text.position)
         else:
-            pass
+            markers["fade"][0]-=1
+            markers["fade"][3]+=markers["fade"][4]
 
-    elif state == "tie":
-        if markers["fade"] == [0,0,0]:
+    if state == "tie":
+        if markers["fade"][0] <= 0:
             screen.blit(tie_text,(window_dim[0]/2-large_font.size("You tied!")[0]/2,window_dim[1]/2-100))
             screen.blit(to_menu_text.text, to_menu_text.position)
         else:
-            pass
+            markers["fade"][0]-=1
+            markers["fade"][3]+=markers["fade"][4]
 
     display.update()
     clock.tick(FPS)
