@@ -165,15 +165,18 @@ class Item(sprite.Sprite):
         self.rect=self.current_sprite.get_rect()
 
     def find_targets(self):
+        global whole_field
         tempt=[]
         if self.targets == "can be healed":
             for card in player1.field:
-                if card.health != card.max_health:
+                if card != None and card.health != card.max_health:
                     tempt.append(card)
         elif self.targets == "player1 field":
             tempt=player1.field
         elif self.targets == "player2 field":
             tempt=player2.field
+        elif self.targets == "whole field":
+            tempt=whole_field
         return tempt
 
 class Player():
@@ -182,7 +185,7 @@ class Player():
         self.player_number=player_number
         self.hand=[]
         self.field: list[None|Mob]=[None,None,None]
-        self.souls=14
+        self.souls=20
         self.hand_pos=hand_pos
         self.field_pos=field_pos
         self.soul_colour=list(SOUL_COLOUR)
@@ -238,15 +241,18 @@ class Player():
             if not ignore_cost:
                 self.souls -= target.cost
         elif type(target) == Item and self.field[pos-1] != None:
-            self.field[pos-1].items[target.condition]=target
-            target.switch_sprite("cut")
-            if not ignore_cost:
-                self.souls -= target.cost
+            if target.condition != "when played":
+                self.field[pos-1].items[target.condition]=target
+                target.switch_sprite("cut")
+                if not ignore_cost:
+                    self.souls -= target.cost
+            else:
+                target.effect(target=self)
 
     def reset(self):
         self.hand=[]
         self.field=[None, None, None]
-        self.souls=14
+        self.souls=20
 
 class ClickableText():
     def __init__(self,font,text:str,colour:tuple[int,int,int],position:Coord):
@@ -308,12 +314,6 @@ def undead(**kwargs): #on hurt
 def sword_slash(**kwargs):
     kwargs["target"].health -= 1
 
-def milk_heal(**kwargs):
-    global until_end
-    if until_end == 0:
-        until_end == 1
-    kwargs["target"].heal(1)
-
 def start_of_turn():
     for card in player1.field:
         if card != None and "start of turn" in card.passives:
@@ -351,6 +351,7 @@ x_rails=[fields_anchor[0],fields_anchor[0]+cut_dim[0]+card_spacing_x,fields_anch
 hearts_rails=[y_rails[0]+cut_dim[0]+10,y_rails[1]-10-20] #0: player 2, 1: player 1
 game_overs=("win", "tie", "lose")
 PORT=6543
+whole_field=Rect(fields_anchor[0],fields_anchor[1],3*cut_dim[0]+3*card_spacing_x,2*cut_dim[1]+card_dim_rot[1]+2*card_spacing_y)
 
 #variables
 running=True
@@ -377,13 +378,12 @@ until_end=0
 #Note: cards for deck use are defined by deckbuilder(), which takes these strings and eval()s them into objects
 #This is so each deck entry has a separate memory value
 deck_plc=Item("Deck Placeholder",0,None,"card_back_rot.png",(100,262),"card_back_rot.png",None,card_dim_rot,'',None,None)
-milk=r'Item("Milk",2,milk_heal,r"Sprites\Milk.png",(0,0),r"Cut Sprites\Milk.png","blue",card_dim,"when played",1,"can be healed")'
 sword=r'Item("Sword",1,sword_slash,r"Sprites\Sword.png",(0,0),r"Cut Sprites\Sword.png","blue",card_dim,"on attack",1,"player1 field")'
 elder=r'Mob("Elder",6,6,[],[warding_laser],{"end of turn":elders_curse},{},"aquatic","ocean","pink",r"Sprites\Elder.png",(0,0),r"Cut Sprites\Elder.png",[(987,522,1323,589)])'
 zombie=r'Mob("Zombie",2,4,[],[bite],{"on hurt":undead},{},"undead","cavern","blue",r"Sprites\Zombie.png",(0,0),r"Cut Sprites\Zombie.png",[(987,512,1323,579)])'
 #Mob()
 
-decklist={zombie:15, elder:15, milk:15}
+decklist={zombie:15, elder:15, sword:15}
 #playername=input("Enter your name: ")
 playername="J1"
 player1=Player(playername,1,(fields_anchor[0],y_rails[1]+cut_dim[1]+card_spacing_y),[(x_rails[0],y_rails[1]),(x_rails[1],y_rails[1]),(x_rails[2],y_rails[1])])
@@ -644,7 +644,7 @@ while running:
             test=draw.rect(screen,ORANGE,Rect(selected.rect.x-5,selected.rect.y-5,selected.rect.width+10,selected.rect.height+10),5)
             screen.blit(large_image,(930,100))
         for i in range(3):
-            if player1.field[i] == None and type(selected) != Item:
+            if player1.field[i] == None and type(selected) != Item and selected in player1.hand:
                 temp=Rect(player1.field_pos[i],cut_dim)
                 draw.rect(screen,ORANGE,temp,5)
                 draw.rect(screen,(255,255,255),Rect(temp.centerx-20,temp.centery-5,40,10))
@@ -771,6 +771,7 @@ while running:
     Bugs:
     1. Opponent's field disappears if you click the lower half of the third card in your field
     2. Undead doesn't work against swords
+    3. Selected card doesn't move after attack
 
     Conditions:
     "end of turn": Called at the end of the attack phase
