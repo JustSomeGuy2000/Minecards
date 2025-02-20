@@ -94,8 +94,14 @@ class Mob(sprite.Sprite):
             self.current_sprite=self.cut_sprite
         self.rect=self.current_sprite.get_rect()
 
+    def heal(self,value):
+        if (self.health + value) <= self.max_health:
+            self.health += self.health
+        else:
+            self.health += self.max_health
+
 class Item(sprite.Sprite):
-    def __init__(self,name:str,cost:int,effect:Callable,sprite:Path,init_pos:Coord,cut_sprite:Path,border:Literal["blue","pink"],dimensions:Size,condition:Literal["end of turn","start of turn","on death","on hurt","on attack","when played"],uses:int):
+    def __init__(self,name:str,cost:int,effect:Callable,sprite:Path,init_pos:Coord,cut_sprite:Path,border:Literal["blue","pink"],dimensions:Size,condition:Literal["end of turn","start of turn","on death","on hurt","on attack","when played"],uses:int,targets:list[Card]|str):
         #ITEM INFO
         self.name=name
         self.cost=cost
@@ -104,6 +110,7 @@ class Item(sprite.Sprite):
         self.border=border
         self.condition=condition #when the item activates
         self.uses=uses
+        self.targets=targets
         #SPRITE AND COORDS
         self.front_sprite=transform.scale(image.load(sprite),dimensions)
         self.original_sprite=sprite
@@ -157,13 +164,25 @@ class Item(sprite.Sprite):
             self.current_sprite=self.cut_sprite
         self.rect=self.current_sprite.get_rect()
 
+    def find_targets(self):
+        tempt=[]
+        if self.targets == "can be healed":
+            for card in player1.field:
+                if card.health != card.max_health:
+                    tempt.append(card)
+        elif self.targets == "player1 field":
+            tempt=player1.field
+        elif self.targets == "player2 field":
+            tempt=player2.field
+        return tempt
+
 class Player():
     def __init__(self,name:str,player_number:int,hand_pos:Coord,field_pos:list[Coord]):
         self.name=name
         self.player_number=player_number
         self.hand=[]
         self.field: list[None|Mob]=[None,None,None]
-        self.souls=7
+        self.souls=14
         self.hand_pos=hand_pos
         self.field_pos=field_pos
         self.soul_colour=list(SOUL_COLOUR)
@@ -227,7 +246,7 @@ class Player():
     def reset(self):
         self.hand=[]
         self.field=[None, None, None]
-        self.souls=7
+        self.souls=14
 
 class ClickableText():
     def __init__(self,font,text:str,colour:tuple[int,int,int],position:Coord):
@@ -274,11 +293,13 @@ def elders_curse(**kwargs): #end of turn
     global selected_move
     global attack_progressing
     global move_hovering_over
+    global targets
     if kwargs["player"] == player1 and kwargs["origin"] in player1.field:
         selected=kwargs["origin"]
         selected_move=kwargs["origin"].moveset[0]
         attack_progressing=True
         move_hovering_over=(kwargs["origin"].move_positions[0],kwargs["origin"].moveset[0])
+        targets=player2.field
 
 def undead(**kwargs): #on hurt
     if kwargs["origin"].health == kwargs["origin"].max_health and kwargs["damage"] >= kwargs["origin"].health:
@@ -286,6 +307,12 @@ def undead(**kwargs): #on hurt
 
 def sword_slash(**kwargs):
     kwargs["target"].health -= 1
+
+def milk_heal(**kwargs):
+    global until_end
+    if until_end == 0:
+        until_end == 1
+    kwargs["target"].heal(1)
 
 def start_of_turn():
     for card in player1.field:
@@ -343,18 +370,20 @@ selected=None #card displayed on the side
 selected_move=None #move that has been selected
 attack_progressing=False #is it the attack target choosing stage
 move_hovering_over=None #tuple of Rect of attack being hovered over and attack function itself, used for click detection
+targets=[]
+until_end=0
 
 #define cards here
 #Note: cards for deck use are defined by deckbuilder(), which takes these strings and eval()s them into objects
 #This is so each deck entry has a separate memory value
-deck_plc=Item("Deck Placeholder",0,None,"card_back_rot.png",(100,262),"card_back_rot.png",None,card_dim_rot,'',None)
-milk=r'Item("Milk",2,None,r"Sprites\Milk.png",(0,0),r"Cut Sprites\Milk.png","blue",card_dim,"when played",1)'
-sword=r'Item("Sword",1,sword_slash,r"Sprites\Sword.png",(0,0),r"Cut Sprites\Sword.png","blue",card_dim,"on attack",1)'
+deck_plc=Item("Deck Placeholder",0,None,"card_back_rot.png",(100,262),"card_back_rot.png",None,card_dim_rot,'',None,None)
+milk=r'Item("Milk",2,milk_heal,r"Sprites\Milk.png",(0,0),r"Cut Sprites\Milk.png","blue",card_dim,"when played",1,"can be healed")'
+sword=r'Item("Sword",1,sword_slash,r"Sprites\Sword.png",(0,0),r"Cut Sprites\Sword.png","blue",card_dim,"on attack",1,"player1 field")'
 elder=r'Mob("Elder",6,6,[],[warding_laser],{"end of turn":elders_curse},{},"aquatic","ocean","pink",r"Sprites\Elder.png",(0,0),r"Cut Sprites\Elder.png",[(987,522,1323,589)])'
 zombie=r'Mob("Zombie",2,4,[],[bite],{"on hurt":undead},{},"undead","cavern","blue",r"Sprites\Zombie.png",(0,0),r"Cut Sprites\Zombie.png",[(987,512,1323,579)])'
 #Mob()
 
-decklist={zombie:15, elder:15, sword:15}
+decklist={zombie:15, elder:15, milk:15}
 #playername=input("Enter your name: ")
 playername="J1"
 player1=Player(playername,1,(fields_anchor[0],y_rails[1]+cut_dim[1]+card_spacing_y),[(x_rails[0],y_rails[1]),(x_rails[1],y_rails[1]),(x_rails[2],y_rails[1])])
@@ -432,10 +461,12 @@ while running:
                 if move_hovering_over != None:
                     if type(selected) == Mob and move_hovering_over[0].collidepoint(pos) and player1.field.index(selected) == subturn-1:
                         selected_move=move_hovering_over[1]
+                        targets=player2.field
                         attack_progressing=True
                         markers["just chose"]=True
                     if type(selected) == Item and move_hovering_over[0].collidepoint(pos) and selected in player1.hand:
                         selected_move=move_hovering_over[1]
+                        targets=selected.find_targets()
                         attack_progressing=True
                         markers["just chose"]=True
                 for i in range(3):
@@ -450,7 +481,7 @@ while running:
 
             if attack_progressing:
                 if type(selected) == Mob:
-                    for card in player2.field:
+                    for card in targets:
                         if card != None and card.rect.collidepoint(pos) and setup == False:
                             target=card
                             counter=selected_move(origin=selected,target=target,player=player1,noattack=False)
@@ -470,16 +501,20 @@ while running:
                                         target.items["on attack"] = None
                             if postsubturn == 1 and setup == False:
                                 abs_subturn += 1
-                            if abs_subturn != 4:
+                            if abs_subturn != 3:
                                 selected = player1.field[subturn-1]
                             else:
                                 selected=player1.field[0]
                                 postsubturn += 1
-                            attack_progressing=False
-                            selected_move=None
-                            move_hovering_over=None
+                            if until_end == 0:
+                                attack_progressing=False
+                                selected_move=None
+                                move_hovering_over=None
+                                targets=[]
+                            else:
+                                until_end -= 1
                 if type(selected) == Item:
-                    for card in player1.field:
+                    for card in targets:
                         if card != None and card.rect.collidepoint(pos) and setup == False:
                             if not selected.cost > player1.souls:
                                 player1.add_to_field(player1.hand.index(selected),player1.field.index(card)+1)
@@ -490,9 +525,14 @@ while running:
                                 else:
                                     selected=player1.field[0]
                                     postsubturn += 1
-                                attack_progressing=False
-                                selected_move=None
-                                move_hovering_over=None
+                                if until_end == 0:
+                                    attack_progressing=False
+                                    selected_move=None
+                                    move_hovering_over=None
+                                    targets=[]
+                                else:
+                                    targets=selected.find_targets()
+                                    until_end -= 1
                             else:
                                 if markers["not enough souls"][0] == 0:
                                     markers["not enough souls"]=[6,5,0,0]
@@ -502,6 +542,7 @@ while running:
                             selected_move=None
                             move_hovering_over=None
                             attack_progressing=False
+                            targets=[]
                 markers["just chose"]=False
 
         elif e.type == MOUSEBUTTONUP and state in game_overs:
@@ -518,7 +559,7 @@ while running:
                 attack_choosing_state=False
                 HOST=''
                 sock=''
-                markers={"retry":False, "deck built":False, "do not connect":True, "start of turn called":False, "not enough souls":[0,0,0,0], "data received, proceed":False, "just chose":False, "finishable":True, "freeze":False, "game over called":False}
+                markers={"retry":False, "deck built":False, "do not connect":True, "start of turn called":False, "not enough souls":[0,0,0,0], "data received, proceed":False, "just chose":False, "finishable":True, "freeze":False, "game over called":False, "fade":[0,[0,0,0],0,0,0]}
                 selected=None
                 selected_move=None
                 attack_progressing=False
@@ -634,8 +675,8 @@ while running:
             markers["start of turn called"] = False
         if abs_subturn >= 4 and setup == True:
             setup=False
-            subturn=1
-            abs_subturn=1
+            subturn=0
+            abs_subturn=0
             player1.souls=1
             player2.souls=1
         filled_positions={}
@@ -650,13 +691,12 @@ while running:
             draw.rect(screen,(255,255,255),Rect(player1.field_pos[postsubturn-2][0],player1.field_pos[postsubturn-2][1]+cut_dim[1]+10,cut_dim[0],10))
         player1.update()
         player2.update()
-        if attack_progressing:
-            for i in range(3):
-                if player1.field[i] != None and type(selected) == Item and selected in player1.hand:
-                    temp=Rect(player1.field_pos[i],cut_dim)
-                    draw.rect(screen,ORANGE,temp,5)
-                    draw.rect(screen,(255,255,255),Rect(temp.centerx-20,temp.centery-5,40,10))
-                    draw.rect(screen,(255,255,255),Rect(temp.centerx-5,temp.centery-20,10,40))
+        for card in targets:
+            if card != None:
+                temp=Rect(card.rect.x,card.rect.y,cut_dim[0],cut_dim[1])
+                draw.rect(screen,ORANGE,temp,5)
+                draw.rect(screen,(255,255,255),Rect(temp.centerx-20,temp.centery-5,40,10))
+                draw.rect(screen,(255,255,255),Rect(temp.centerx-5,temp.centery-20,10,40))
         if markers["finishable"] and setup == False and not markers["game over called"]:
             if player1.field == [None, None, None]:
                 state = "lose"
@@ -676,7 +716,7 @@ while running:
                 markers["fade"]=[60,[10,220,70],255,0,0]
                 markers["fade"][4]=markers["fade"][2]/markers["fade"][0]
                 markers["game over called"]=True
-        #screen.blit(mjgs.render(f"{str(abs_subturn)}, {str(subturn)}",True,(255,255,255)),(0,0))
+        screen.blit(mjgs.render(f"{str(abs_subturn)}, {str(subturn)}",True,(255,255,255)),(0,0))
 
     colourval = markers["fade"][1]+[markers["fade"][3]]
     temps=Surface(window_dim)
@@ -726,24 +766,11 @@ while running:
     6. Add start of turn animations
     7. Implement applying items onto mobs (nearly done) (specifically add "when played" and figure out milk)
     8. Implement subturn indicator
-    9. When game ends, background fades to black (lose) or green (otherwise), then text fades in
+    10. Does item application count as a subturn?
 
-    Sequence for adding to field:
-    1. Click on card in hand: detected using card.rect.collidepoint(mouse position)
-    2. The card that is clicked adds itself to selected
-    3. The game loop displays whatever is selected
-    4. Click on field slot: detected using rect.collidepoint(mouse position) and field slot coords
-    5. If a valid slot is clicked, Player.add_to_field() is called
-
-    Sequence for attacking:
-    1. Card is automatically added to selected (as attacking goes in order)
-    2. The card that is clicked adds itself to selected
-    3. The game loop displays whatever is selected
-    4. Hover over an attack or ability: an orange hollow rectangle appears highlighting it: detected using rect.collidepoint(mouse position) and Mob.move_positions, drawn using draw.rect(); wait, can that draw hollow rectangles?
-    5. Click on move, is added to selected_move as Mob.moveset[x]: detected using collidepoint again, get index number of move_position clicked, move is that index number in moveset.
-    6. attack_progressing set to True
-    7. Click on a targetable Mob: detected using collidepoint again
-    8. Since attack_progressing is True, this calls the function from selectied_move and passes the current Mob and original Mob as the arguments
+    Bugs:
+    1. Opponent's field disappears if you click the lower half of the third card in your field
+    2. Undead doesn't work against swords
 
     Conditions:
     "end of turn": Called at the end of the attack phase
