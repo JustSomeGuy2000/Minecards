@@ -6,7 +6,7 @@ import random as r
 import time as t
 import socket
 import select
-import math
+import math as m
 
 type Card = Mob|Item
 type Coord = tuple[int|float,int|float]
@@ -17,7 +17,7 @@ type Attack_params = dict[Literal["origin"]:Card,Literal["target"]:Card,Literal[
 #None values mean add later
 
 class Mob(sprite.Sprite):
-    def __init__(self,name:str,cost:int,health:int,abilities:list[Callable],attacks:list[Callable],passives:dict[Literal["end of turn","start of turn","on death","on hurt","on attack","when played"],Callable],items:dict[Literal["end of turn","start of turn","on death","on hurt","on attack","when played"],Item],mob_class:Literal["undead","arthropod","aquatic","human","misc"],biome:Literal["plains","cavern","ocean","swamp"],border:Literal["blue","pink"],sprite:Path,init_pos:Coord,cut_sprite:Path,move_positions:list[tuple[int,int,int,int]]):
+    def __init__(self,name:str,cost:int,health:int,abilities:dict[Callable,int],attacks:list[Callable],passives:dict[Literal["end of turn","start of turn","on death","on hurt","on attack","when played"],Callable],items:dict[Literal["end of turn","start of turn","on death","on hurt","on attack","when played"],Item],mob_class:Literal["undead","arthropod","aquatic","human","misc"],biome:Literal["plains","cavern","ocean","swamp"],border:Literal["blue","pink"],sprite:Path,init_pos:Coord,cut_sprite:Path,move_positions:list[tuple[int,int,int,int]]):
         super().__init__()
         #MOB INFO
         self.name=name
@@ -27,7 +27,7 @@ class Mob(sprite.Sprite):
         #passives listed first on card, then attacks, then abilities
         self.abilities=abilities 
         self.passives=passives #dict, index is a trigger marker which allows functions to know when to call it, same for items
-        self.moveset=attacks + abilities #used for finding which one was clicked
+        self.moveset=attacks #used for finding which one was clicked
         self.move_positions=[]
         for position in move_positions:
             self.move_positions.append(Rect(position[0],position[1],position[2]-position[0],position[3]-position[1]))#hitboxes of moves, in order
@@ -76,7 +76,10 @@ class Mob(sprite.Sprite):
         for position in self.move_positions:
             if selected == self and position.collidepoint(mouse.get_pos()) and not attack_progressing and self == player1.field[subturn-1]:
                 draw.rect(screen,ORANGE,position,5)
-                move_hovering_over=(position,self.moveset[self.move_positions.index(position)])
+                if self.move_positions.index(position) < len(self.moveset):
+                    move_hovering_over=(position,self.moveset[self.move_positions.index(position)])
+                else:
+                    move_hovering_over=(position,self.moveset[self.move_positions.index(position)-len(self.moveset)])
         if attack_progressing:
             draw.rect(screen,ORANGE,move_hovering_over[0],5)
         screen.blit(self.current_sprite, (self.rect.x,self.rect.y))
@@ -96,12 +99,13 @@ class Mob(sprite.Sprite):
 
     def heal(self,value):
         if (self.health + value) <= self.max_health:
-            self.health += self.health
+            self.health += value
         else:
-            self.health += self.max_health
+            self.health = self.max_health
 
 class Item(sprite.Sprite):
-    def __init__(self,name:str,cost:int,effect:Callable,sprite:Path,init_pos:Coord,cut_sprite:Path,border:Literal["blue","pink"],dimensions:Size,condition:Literal["end of turn","start of turn","on death","on hurt","on attack","when played"],uses:int,targets:list[Card]|str):
+    def __init__(self,name:str,cost:int,effect:Callable,sprite:Path,init_pos:Coord,cut_sprite:Path,border:Literal["blue","pink"],dimensions:Size,condition:Literal["end of turn","start of turn","on death","on hurt","on attack","when played"],uses:int,targets:Literal["can be healed","player1 field","player2 field","whole field","all on field","all healable"]):
+        super().__init__()
         #ITEM INFO
         self.name=name
         self.cost=cost
@@ -177,6 +181,15 @@ class Item(sprite.Sprite):
             tempt=player2.field
         elif self.targets == "whole field":
             tempt=whole_field
+        elif self.targets == "all on field":
+            tempt=player1.field + player2.field
+        elif self.targets == "all healable":
+            for card in player1.field:
+                if card != None and card.health != card.max_health:
+                    tempt.append(card)
+            for card in player2.field:
+                if card != None and card.health != card.max_health:
+                    tempt.append(card)
         return tempt
 
 class Player():
@@ -207,11 +220,13 @@ class Player():
                 draw.rect(screen,(255,0,0),Rect(card.rect.x,hearts_rails[2-self.player_number],cut_dim[0]*card.health/card.max_health,20))
                 screen.blit(small_font.render(str(card.health),True,(255,255,255)),(card.rect.x+5,hearts_rails[2-self.player_number]+1))
                 screen.blit(small_font.render(str(card.max_health),True,(255,255,255)),(card.rect.x-5+cut_dim[0]-round(small_font.size(str(card.max_health))[0]),hearts_rails[2-self.player_number]+1))
+                if card.status["psn"] > 0:
+                    screen.blit(effect_sprites["psn"],(card.rect.x,hearts_rails[2-self.player_number]+m.copysign(25,(1.5-self.player_number)*-1)))
                 if card.health <= 0:
                     if "on death" in card.passives:
-                        card.passives["on_death"]()
+                        card.passives["on death"](origin=card,player=self)
                     if "on death" in card.items:
-                        card.items["on death"]()
+                        card.items["on death"](origin=card,player=self)
                     self.field[self.field.index(card)]=None
         screen.blit(soul,self.souls_pos)
         screen.blit(mjgs.render(str(self.souls),True,tuple(self.soul_colour)),(self.souls_pos[0]+token_dim[0]+5,self.souls_pos[1]-2))
@@ -232,8 +247,11 @@ class Player():
                     markers["not enough souls"][2] = 1
                 markers["not enough souls"][0] -= 1
 
-    def add_to_field(self,card:int,pos:int,ignore_cost:bool=False): #card is index number of hand card to take, pos is field position to take (in human number terms, not list index)
-        target=self.hand.pop(card)
+    def add_to_field(self,card:int,pos:int,ignore_cost:bool=False,card_override=None,pos_override=None): #card is index number of hand card to take, pos is field position to take (in human number terms, not list index)
+        if card_override == None:
+            target=self.hand.pop(card)
+        else:
+            target=card_override
         if type(target) == Mob:
             self.field[pos-1]=target
             target.switch_sprite("cut")
@@ -247,7 +265,10 @@ class Player():
                 if not ignore_cost:
                     self.souls -= target.cost
             else:
-                target.effect(target=self)
+                if pos_override == None:
+                    target.effect(target=self.field[pos-1], origin=target, player=self)
+                else:
+                    target.effect(target=pos_override, origin=target, player=self)
 
     def reset(self):
         self.hand=[]
@@ -294,6 +315,30 @@ def bite(**kwargs:Attack_params) -> Literal[True]:
             kwargs["target"].passives["on hurt"](origin=kwargs["origin"],target=kwargs["target"],damage=2)
     return True
 
+def snipe(**kwargs:Attack_params) -> Literal[False]:
+    if kwargs["noattack"] == False:
+        kwargs["target"].health-=1
+        if "on hurt" in kwargs["target"].passives:
+            kwargs["target"].passives["on hurt"](origin=kwargs["origin"],target=kwargs["target"],damage=1)
+    return False
+
+def rush(**kwargs:Attack_params) -> Literal[True]:
+    if kwargs["noattack"] == False:
+        kwargs["target"].health-=1
+        if "on hurt" in kwargs["target"].passives:
+            kwargs["target"].passives["on hurt"](origin=kwargs["origin"],target=kwargs["target"],damage=1)
+    return True
+
+def spore(**kwargs): #on death
+    opp=None
+    if kwargs["player"].player_number == 1:
+        opp=player2
+    else:
+        opp=player1
+    for card in opp.field:
+        if card != None:
+            card.status["psn"] += 1
+
 def elders_curse(**kwargs): #end of turn
     global selected
     global selected_move
@@ -311,8 +356,32 @@ def undead(**kwargs): #on hurt
     if kwargs["origin"].health == kwargs["origin"].max_health and kwargs["damage"] >= kwargs["origin"].health:
         kwargs["origin"].health=1
 
+def play_dead(**kwargs):
+    kwargs["origin"].switch_sprite("front")
+    kwargs["player"].hand.append(kwargs["origin"])
+
 def sword_slash(**kwargs):
     kwargs["target"].health -= 1
+
+def milk_cleanse(**kwargs):
+    kwargs["target"].items={}
+
+def milk_share(**kwargs) -> bool:
+    result=False
+    if kwargs["player"].souls >= 1:
+        result=True
+        for card in kwargs["player"].field:
+            if card != None and card != kwargs["origin"]:
+                card.heal(1)
+    return result
+
+def bread_heal(**kwargs):
+    kwargs["target"].heal(2)
+
+def cake_heal(**kwargs):
+    for card in kwargs["player"].field:
+        if card != None:
+            card.heal(1)
 
 def start_of_turn():
     for card in player1.field:
@@ -352,6 +421,7 @@ hearts_rails=[y_rails[0]+cut_dim[0]+10,y_rails[1]-10-20] #0: player 2, 1: player
 game_overs=("win", "tie", "lose")
 PORT=6543
 whole_field=Rect(fields_anchor[0],fields_anchor[1],3*cut_dim[0]+3*card_spacing_x,2*cut_dim[1]+card_dim_rot[1]+2*card_spacing_y)
+effect_sprites={"psn":image.load("psn.png")}
 
 #variables
 running=True
@@ -378,12 +448,19 @@ until_end=0
 #Note: cards for deck use are defined by deckbuilder(), which takes these strings and eval()s them into objects
 #This is so each deck entry has a separate memory value
 deck_plc=Item("Deck Placeholder",0,None,"card_back_rot.png",(100,262),"card_back_rot.png",None,card_dim_rot,'',None,None)
+axolotl=r'Mob("Axolotl",3,3,{},[bite],{"on death":play_dead},{},"aquatic","ocean","blue",r"Sprites\Axolotl.png",(0,0),r"Cut SPrites\Axolotl.png",[(987,512,1323,579)])'
+bogged=r'Mob("Bogged",3,3,{},[snipe],{"on death":spore},{},"undead","swamp","blue",r"Sprites\Bogged.webp",(0,0),r"Cut Sprites\Bogged.jpg",[(987,522,1323,579)])'
+bread=r'Item("Bread",1,bread_heal,r"Sprites\Bread.png",(0,0),r"Cut Sprites\Bread.png","blue",card_dim,"when played",1,"all healable")'
+cake=r'Item("Cake",2,cake_heal,r"Sprites\Cake.png",(0,0),r"Cut Sprites\Cake.png","blue",card_dim,"when played",1,"player1 field")'
+cow=r'Mob("Cow",3,4,{milk_share:1},[rush],{},{},"misc","plains","blue",r"Sprites\Cow.png",(0,0),r"Cut Sprites\Cow.png",[(987,445,1323,512),(987,512,1323,579)])'
+dummy=r'Mob("Dummy",0,999,{},[bite],{},{},"misc","plains","pink",r"Sprites\Dummy.png",(0,0),r"Cut Sprites\Dummy.png",[(987,512,1323,579)])'
+elder=r'Mob("Elder",6,6,{},[warding_laser],{"end of turn":elders_curse},{},"aquatic","ocean","pink",r"Sprites\Elder.png",(0,0),r"Cut Sprites\Elder.png",[(987,522,1323,589)])'
+milk=r'Item("Milk",2,milk_cleanse,r"Sprites\Milk.png",(0,0),r"Cut Sprites\Milk.png","blue",card_dim,"when played",1,"player1 field")'
 sword=r'Item("Sword",1,sword_slash,r"Sprites\Sword.png",(0,0),r"Cut Sprites\Sword.png","blue",card_dim,"on attack",1,"player1 field")'
-elder=r'Mob("Elder",6,6,[],[warding_laser],{"end of turn":elders_curse},{},"aquatic","ocean","pink",r"Sprites\Elder.png",(0,0),r"Cut Sprites\Elder.png",[(987,522,1323,589)])'
-zombie=r'Mob("Zombie",2,4,[],[bite],{"on hurt":undead},{},"undead","cavern","blue",r"Sprites\Zombie.png",(0,0),r"Cut Sprites\Zombie.png",[(987,512,1323,579)])'
+zombie=r'Mob("Zombie",2,4,{},[bite],{"on hurt":undead},{},"undead","cavern","blue",r"Sprites\Zombie.png",(0,0),r"Cut Sprites\Zombie.png",[(987,512,1323,579)])'
 #Mob()
 
-decklist={zombie:15, elder:15, sword:15}
+decklist={zombie:15, cake:15}
 #playername=input("Enter your name: ")
 playername="J1"
 player1=Player(playername,1,(fields_anchor[0],y_rails[1]+cut_dim[1]+card_spacing_y),[(x_rails[0],y_rails[1]),(x_rails[1],y_rails[1]),(x_rails[2],y_rails[1])])
@@ -421,21 +498,22 @@ while running:
             running=False
         elif e.type == MOUSEBUTTONUP and state not in game_overs and not markers["freeze"]:
             pos=mouse.get_pos()
-            if host_text.textrect.collidepoint(pos):
-                if markers["do not connect"]:
-                    state="game"
-                    player2=Player("Player 2",2,(fields_anchor[0],fields_anchor[1]/2-card_dim[1]+10),[(x_rails[0],y_rails[0]),(x_rails[1],y_rails[0]),(x_rails[2],y_rails[0])])
-                else:
-                    connect_state="hosting"
-            elif connect_text.textrect.collidepoint(pos):
-                connect_state="connecting"
-            elif ip_submit_text.textrect.collidepoint(pos) and state == "menu" and connect_state == "connecting":
-                try:
-                    sock.connect((HOST,PORT))
-                    state="pregame" #await info to build player2
-                    print("Connection successful")
-                except:
-                    markers["retry"]=True
+            if state != "game":
+                if host_text.textrect.collidepoint(pos):
+                    if markers["do not connect"]:
+                        state="game"
+                        player2=Player("Player 2",2,(fields_anchor[0],fields_anchor[1]/2-card_dim[1]+10),[(x_rails[0],y_rails[0]),(x_rails[1],y_rails[0]),(x_rails[2],y_rails[0])])
+                    else:
+                        connect_state="hosting"
+                elif connect_text.textrect.collidepoint(pos):
+                    connect_state="connecting"
+                elif ip_submit_text.textrect.collidepoint(pos) and state == "menu" and connect_state == "connecting":
+                    try:
+                        sock.connect((HOST,PORT))
+                        state="pregame" #await info to build player2
+                        print("Connection successful")
+                    except:
+                        markers["retry"]=True
 
             if state == "game" and not attack_progressing:
                 for card in player1.field:
@@ -502,7 +580,7 @@ while running:
                             if postsubturn == 1 and setup == False:
                                 abs_subturn += 1
                             if abs_subturn != 3:
-                                selected = player1.field[subturn-1]
+                                selected = player1.field[abs_subturn%len(filled_positions)]
                             else:
                                 selected=player1.field[0]
                                 postsubturn += 1
@@ -517,11 +595,15 @@ while running:
                     for card in targets:
                         if card != None and card.rect.collidepoint(pos) and setup == False:
                             if not selected.cost > player1.souls:
-                                player1.add_to_field(player1.hand.index(selected),player1.field.index(card)+1)
+                                if card in player1.field:
+                                    player1.add_to_field(player1.hand.index(selected),player1.field.index(card)+1)
+                                elif card in player2.field:
+                                    player2.add_to_field(None,player2.field.index(card)+1,ignore_cost=True,card_override=selected,pos_override=card)
+                                    player1.souls -= selected.cost
                                 if postsubturn == 1 and setup == False:
                                     abs_subturn += 1
-                                if abs_subturn != 4:
-                                    selected = player1.field[subturn-1]
+                                if abs_subturn != 3:
+                                    selected = player1.field[abs_subturn%len(filled_positions)]
                                 else:
                                     selected=player1.field[0]
                                     postsubturn += 1
@@ -651,12 +733,17 @@ while running:
                 draw.rect(screen,(255,255,255),Rect(temp.centerx-5,temp.centery-20,10,40))
         if postsubturn >= 2:
             skippost=True
-            if player1.field[postsubturn-2] != None and "end of turn" in player1.field[postsubturn-2].passives:
-                player1.field[postsubturn-2].passives["end of turn"](origin=player1.field[postsubturn-2],player=player1)
-                skippost=False
-            if player1.field[postsubturn-2] != None and "end of turn" in player1.field[postsubturn-2].items:
-                player1.field[postsubturn-2].items["end of turn"].effect(origin=player1.field[postsubturn-2],player=player1)
-                skippost=False
+            if player1.field[postsubturn-2] != None:
+                if "end of turn" in player1.field[postsubturn-2].passives:
+                    player1.field[postsubturn-2].passives["end of turn"](origin=player1.field[postsubturn-2],player=player1)
+                    skippost=False
+                if "end of turn" in player1.field[postsubturn-2].items:
+                    player1.field[postsubturn-2].items["end of turn"].effect(origin=player1.field[postsubturn-2],player=player1)
+                    skippost=False
+                if player1.field[postsubturn-2].status["psn"] > 0:
+                    player1.field[postsubturn-2].health -= 1
+                    player1.field[postsubturn-2].status["psn"] -= 1
+                    skippost=False
             if skippost:
                 postsubturn += 1
         hand_cost=[]
@@ -764,14 +851,16 @@ while running:
     4. Add Mobs and Items
     5. Impement turn starts
     6. Add start of turn animations
-    7. Implement applying items onto mobs (nearly done) (specifically add "when played" and figure out milk)
+    7. Implement applying items onto mobs (nearly done) (specifically add "when played"
     8. Implement subturn indicator
+    9. Implement putting multiple items of the same type onto mobs
     10. Does item application count as a subturn?
+    11. Change poision damage to after mob's turn instead of in post-turn?
+    12. Implement whole field item targeting
 
     Bugs:
-    1. Opponent's field disappears if you click the lower half of the third card in your field
-    2. Undead doesn't work against swords
-    3. Selected card doesn't move after attack
+    1. Undead doesn't work against swords
+    2. Turn system is absolutely messed up (especially, if there are 3 elders, the third somehow takes another turn after the post-turn period). And aside from the first turn, other turns completely ignore the 1st field card. This, I suppose, is what I get for tweaking the turn changing code so much to accommodate every edge case.
 
     Conditions:
     "end of turn": Called at the end of the attack phase
