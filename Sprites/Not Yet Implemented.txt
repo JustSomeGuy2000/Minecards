@@ -1,6 +1,3 @@
-Chicken
-Cow
-Creeper
 Drowned
 Egg Rain
 Frog
