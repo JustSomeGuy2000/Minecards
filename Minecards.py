@@ -37,6 +37,7 @@ class Mob(sprite.Sprite):
         self.status={"psn":0,"aquatised":0}
         self.border=border #blue or pink
         self.miscs=kwargs
+        self.original_miscs=kwargs
         #SPRITE AND COORDS
         self.front_sprite=transform.scale(image.load(sprite),card_dim)
         self.original_sprite=sprite
@@ -106,13 +107,14 @@ class Mob(sprite.Sprite):
 
     def reset(self):
         self.health=self.max_health
-        self.items=[]
+        self.items={}
         self.status={"psn":0,"aquatised":0}
         self.movement_phase=0
         self.destinations=[]
         self.times=[]
         self.timer=0
         self.velocity=(0,0)
+        self.miscs=self.original_miscs
         return self
 
 class Item(sprite.Sprite):
@@ -367,6 +369,19 @@ def tongue_snare(func) -> bool: #decorator that applies to passives and abilitie
         return result
     return wrapper
 
+def atk_check(func) -> bool: #decorator that applies to all attacks, first decorator layer
+    def wrapper(**kwargs):
+        if "Egg Rain" not in [item.name for item in list(kwargs["origin"].items.values())]:
+            result=func(**kwargs)
+            if kwargs["origin"] in player2.field and "Horse" in [mob.name for mob in player1.field]: #quick strike
+                kwargs["origin"].health -= 1 #change to for mob in player1.field:
+                if "on hurt" in kwargs["origin"].passives:
+                    kwargs["origin"].passives["on hurt"](origin=[],target=kwargs["target"],damage=1)
+            return result
+        else:
+            return func(origin=kwargs["origin"],target=kwargs["target"],player=kwargs["player"],noattack=True)
+    return wrapper
+
 @egg_check
 def bite(**kwargs:Attack_params) -> Literal[True]: #attack
     if kwargs["noattack"] == False:
@@ -409,6 +424,21 @@ def elders_curse(**kwargs): #passive: end of turn
         attack_progressing=True
         move_hovering_over=(kwargs["origin"].move_positions[0],kwargs["origin"].moveset[0])
         targets=player2.field
+
+@egg_check
+def eye_laser(**kwargs:Attack_params) -> Literal[False]: #attack
+    if kwargs["noattack"] == False:
+        if kwargs["player"].player_number == 1:
+            opp=player2
+        else:
+            opp=player1
+        dmg=1
+        if kwargs["player"].field.index(kwargs["origin"])-opp.field.index(kwargs["target"]) != 0:
+            dmg+=1
+        kwargs["target"].health-=dmg
+        if "on hurt" in kwargs["target"].passives:
+            kwargs["target"].passives["on hurt"](origin=kwargs["origin"],target=kwargs["target"],damage=dmg)
+    return False
 
 def goat_horn_bounce(**kwargs): #item
     player2.hand.append(kwargs["target"].reset())
@@ -485,6 +515,9 @@ def spore(**kwargs): #passive: on death
 
 def sword_slash(**kwargs): #item
     kwargs["target"].health -= 1
+
+def thorn_body(**kwargs): #passive: on hurt
+    kwargs["origin"].health-=1
 
 @egg_check
 def tongue_whip(**kwargs) -> Literal[True]: #attack
@@ -605,12 +638,14 @@ elder=r'Mob("Elder",6,6,[],[warding_laser],{"end of turn":elders_curse},{},"aqua
 egg_rain=r'Item("Egg Rain",1,nofunction_item,r"Sprites\Egg Rain.png",(0,0),r"Cut Sprites\Egg Rain.png","blue",card_dim,"on attack",1,"player2 field")'
 frog=r'Mob("Frog",2,3,[],[tongue_whip],{},{},"aquatic","swamp","blue",r"Sprites\Frog.png",(0,0),r"Cut Sprites\Frog.png",[(987,512,1323,579)])'
 goat_horn=r'Item("Goat Horn",3,goat_horn_bounce,r"Sprites\Goat Horn.png",(0,0),r"Cut Sprites\Goat Horn.png","pink",card_dim,"when played",1,"special: goat horn")'
+guardian=r'Mob("Guardian",4,3,[],[eye_laser],{"on hurt":thorn_body},{},"aquatic","ocean","blue",r"Sprites\Guardian.png",(0,0),r"Cut Sprites\Guardian.png",[(987,502,1323,569)])'
+horse=r'Mob("Horse",4,5,[],[bite],{},{},"misc","plains","pink",r"Sprites\Horse.png",(0,0),r"Cut Sprites\Horse.png",[(987,512,1323,579)])'
 milk=r'Item("Milk",2,milk_cleanse,r"Sprites\Milk.png",(0,0),r"Cut Sprites\Milk.png","blue",card_dim,"when played",1,"player1 field")'
 sword=r'Item("Sword",1,sword_slash,r"Sprites\Sword.png",(0,0),r"Cut Sprites\Sword.png","blue",card_dim,"on attack",1,"player1 field")'
 zombie=r'Mob("Zombie",2,4,[],[bite],{"on hurt":undead},{},"undead","cavern","blue",r"Sprites\Zombie.png",(0,0),r"Cut Sprites\Zombie.png",[(987,512,1323,579)])'
 #Mob()
 
-decklist={elder:15, sword:15, goat_horn:15}
+decklist={guardian:15, zombie:15}
 #playername=input("Enter your name: ")
 playername="J1"
 player1=Player(playername,1,(fields_anchor[0],y_rails[1]+cut_dim[1]+card_spacing_y),[(x_rails[0],y_rails[1]),(x_rails[1],y_rails[1]),(x_rails[2],y_rails[1])])
@@ -1047,7 +1082,7 @@ while running:
     9. Does item application count as a subturn?
     10. Change poison damage to after mob's turn instead of in post-turn?
     11. Implement whole field item targeting
-    12. Implement tongue_snare (figure out interaction with egg_check)
+    12. Convert tongue_snare and egg_check into atk_check, abl_check and psv_check (individual checks for attacks, abilities and passives). Would greatly increase clarity since only one check is needed for each function.
 
     Bugs:
     1. Undead doesn't work against swords
