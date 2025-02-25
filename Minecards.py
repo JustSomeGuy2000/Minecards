@@ -345,49 +345,57 @@ def deckbuilder(list_to_use:dict[Card,int]) -> list[Card]:
     r.shuffle(here_deck)
     return here_deck
 
-def egg_check(func) -> bool: #decorator that applies to attacks and abilities
-    def wrapper(**kwargs):
-        if "Egg Rain" not in [item.name for item in list(kwargs["origin"].items.values())]:
-            result=func(**kwargs)
-            return result
-    return wrapper
-
-def tongue_snare(func) -> bool: #decorator that applies to passives and abilities (not finished)
-    def wrapper(**kwargs):
-        if kwargs["origin"] in player1.field:
-            match=player2.field[player1.field.index(kwargs["origin"])]
-            if match != None and match.name != "Frog":
-                result=func(**kwargs)
-            elif match == None:
-                result=func(**kwargs)
-        elif kwargs["origin"] in player2.field:
-            match=player1.field[player2.field.index(kwargs["origin"])]
-            if match != None and match.name != "Frog":
-                result=func(**kwargs)
-            elif match == None:
-                result=func(**kwargs)
-        return result
-    return wrapper
-
 def atk_check(func) -> bool: #decorator that applies to all attacks, first decorator layer
-    def wrapper(**kwargs):
-        if "Egg Rain" not in [item.name for item in list(kwargs["origin"].items.values())]:
+    def atk_wrapper(**kwargs):
+        if "Egg Rain" not in [item.name for item in list(kwargs["origin"].items.values())]: #egg rain
             result=func(**kwargs)
-            if kwargs["origin"] in player2.field and "Horse" in [mob.name for mob in player1.field]: #quick strike
-                kwargs["origin"].health -= 1 #change to for mob in player1.field:
-                if "on hurt" in kwargs["origin"].passives:
-                    kwargs["origin"].passives["on hurt"](origin=[],target=kwargs["target"],damage=1)
+            if kwargs["origin"] in player2.field: #quick strike
+                for mob in player1.field:
+                    if mob.name == "Horse":
+                        kwargs["origin"].health -= 1
+                        if "on hurt" in kwargs["origin"].passives:
+                            kwargs["origin"].passives["on hurt"](origin=mob,target=kwargs["target"],damage=1)
             return result
         else:
             return func(origin=kwargs["origin"],target=kwargs["target"],player=kwargs["player"],noattack=True)
-    return wrapper
+    return atk_wrapper
 
-@egg_check
+def psv_check(func): #decorator that applies to all passives, first decorator layer
+    def psv_wrapper(**kwargs):
+        opp=None
+        if kwargs["target"] in player2.field:
+            opp=player2
+        else:
+            opp=player1
+        match=kwargs["player"].field[opp.field.index(kwargs["target"])]
+        if match != None and match.name == "Frog": #tongue snare
+            result=None
+        else:
+            result=func(**kwargs)
+            print(f"{func.__name__} used.")
+        return result
+    return psv_wrapper
+
+def abl_check(func):  #decorator that applies to all abilities, first decorator layer
+    def abl_wrapper(**kwargs):
+        if kwargs["player"].player_number == 1:
+            opp=player2
+        else:
+            opp=player1
+        match=opp.field[kwargs["player"].field.index(kwargs["origin"])]
+        if "Egg Rain" in [item.name for item in list(kwargs["origin"].items.values())] or (match != None and match.name == "Frog"): #egg rain and tongue snare
+            result=None
+        else:
+            result=func(**kwargs)
+        return result
+    return abl_wrapper
+
+@atk_check
 def bite(**kwargs:Attack_params) -> Literal[True]: #attack
     if kwargs["noattack"] == False:
         kwargs["target"].health-=2
         if "on hurt" in kwargs["target"].passives:
-            kwargs["target"].passives["on hurt"](origin=kwargs["origin"],target=kwargs["target"],damage=2)
+            kwargs["target"].passives["on hurt"](origin=kwargs["origin"],target=kwargs["target"],player=kwargs["player"],damage=2)
     return True
 
 def bread_heal(**kwargs): #item
@@ -398,7 +406,7 @@ def cake_heal(**kwargs): #item
         if card != None:
             card.heal(1)
 
-@egg_check
+@atk_check
 def drown(**kwargs:Attack_params): #attack
     if kwargs["noattack"] == False:
         if kwargs["target"].mob_class == "aquatic" or kwargs["target"].status["aquatised"] > 0:
@@ -407,11 +415,11 @@ def drown(**kwargs:Attack_params): #attack
             dmg=2
         kwargs["target"].health-=dmg
         if "on hurt" in kwargs["target"].passives:
-            kwargs["target"].passives["on hurt"](origin=kwargs["origin"],target=kwargs["target"],damage=dmg)
+            kwargs["target"].passives["on hurt"](origin=kwargs["origin"],target=kwargs["target"],player=kwargs["player"],damage=dmg)
     kwargs["target"].status["aquatised"] = 2
     return True
 
-@egg_check
+@psv_check
 def elders_curse(**kwargs): #passive: end of turn
     global selected
     global selected_move
@@ -425,7 +433,7 @@ def elders_curse(**kwargs): #passive: end of turn
         move_hovering_over=(kwargs["origin"].move_positions[0],kwargs["origin"].moveset[0])
         targets=player2.field
 
-@egg_check
+@atk_check
 def eye_laser(**kwargs:Attack_params) -> Literal[False]: #attack
     if kwargs["noattack"] == False:
         if kwargs["player"].player_number == 1:
@@ -437,7 +445,7 @@ def eye_laser(**kwargs:Attack_params) -> Literal[False]: #attack
             dmg+=1
         kwargs["target"].health-=dmg
         if "on hurt" in kwargs["target"].passives:
-            kwargs["target"].passives["on hurt"](origin=kwargs["origin"],target=kwargs["target"],damage=dmg)
+            kwargs["target"].passives["on hurt"](origin=kwargs["origin"],target=kwargs["target"],player=kwargs["player"],damage=dmg)
     return False
 
 def goat_horn_bounce(**kwargs): #item
@@ -448,7 +456,7 @@ def goat_horn_bounce(**kwargs): #item
 def milk_cleanse(**kwargs): #item
     kwargs["target"].items={}
 
-@egg_check
+@abl_check
 def milk_share(**kwargs) -> bool: #ability
     result=False
     if kwargs["player"].souls >= 1:
@@ -459,14 +467,16 @@ def milk_share(**kwargs) -> bool: #ability
         kwargs["player"].souls -= 1
     return result
 
+@psv_check
 def mystery_egg(**kwargs): #passive: on this turn
     kwargs["player"].hand.append(deck.pop())
 
+@psv_check
 def play_dead(**kwargs): #passive: on death
     kwargs["origin"].switch_sprite("front")
     kwargs["player"].hand.append(kwargs["origin"])
 
-@egg_check
+@abl_check
 def prime(**kwargs): #ability
     opp=None
     if kwargs["player"].player_number == 1:
@@ -487,22 +497,23 @@ def prime(**kwargs): #ability
                     card.passives["on hurt"](origin=kwargs["origin"],target=card,damage=3)
         kwargs["origin"].health=0
 
-@egg_check
+@atk_check
 def rush(**kwargs:Attack_params) -> Literal[True]: #attack
     if kwargs["noattack"] == False:
         kwargs["target"].health-=1
         if "on hurt" in kwargs["target"].passives:
-            kwargs["target"].passives["on hurt"](origin=kwargs["origin"],target=kwargs["target"],damage=1)
+            kwargs["target"].passives["on hurt"](origin=kwargs["origin"],target=kwargs["target"],player=kwargs["player"],damage=1)
     return True
 
-@egg_check
+@atk_check
 def snipe(**kwargs:Attack_params) -> Literal[False]: #attack
     if kwargs["noattack"] == False:
         kwargs["target"].health-=1
         if "on hurt" in kwargs["target"].passives:
-            kwargs["target"].passives["on hurt"](origin=kwargs["origin"],target=kwargs["target"],damage=1)
+            kwargs["target"].passives["on hurt"](origin=kwargs["origin"],target=kwargs["target"],player=kwargs["player"],damage=1)
     return False
 
+@psv_check
 def spore(**kwargs): #passive: on death
     opp=None
     if kwargs["player"].player_number == 1:
@@ -516,10 +527,11 @@ def spore(**kwargs): #passive: on death
 def sword_slash(**kwargs): #item
     kwargs["target"].health -= 1
 
+@psv_check
 def thorn_body(**kwargs): #passive: on hurt
     kwargs["origin"].health-=1
 
-@egg_check
+@atk_check
 def tongue_whip(**kwargs) -> Literal[True]: #attack
     global until_end
     global selected
@@ -528,18 +540,19 @@ def tongue_whip(**kwargs) -> Literal[True]: #attack
     if kwargs["noattack"] == False:
         kwargs["target"].health-=1
         if "on hurt" in kwargs["target"].passives:
-            kwargs["target"].passives["on hurt"](origin=kwargs["origin"],target=kwargs["target"],damage=1)
+            kwargs["target"].passives["on hurt"](origin=kwargs["origin"],target=kwargs["target"],player=kwargs["player"],damage=1)
         until_end += 1
         targets = kwargs["target"].items
         selected=kwargs["origin"]
         markers["item stealing"]=(True, kwargs["origin"])
     return True
 
+@psv_check
 def undead(**kwargs): #passive: on hurt
     if kwargs["origin"].health == kwargs["origin"].max_health and kwargs["damage"] >= kwargs["origin"].health:
         kwargs["origin"].health=1
 
-@egg_check
+@atk_check
 def warding_laser(**kwargs:Attack_params) -> Literal[False]: #attack
     if kwargs["noattack"] == False:
         opp=None
@@ -550,7 +563,7 @@ def warding_laser(**kwargs:Attack_params) -> Literal[False]: #attack
         dmg=abs(opp.field.index(kwargs["target"])-kwargs["player"].field.index(kwargs["origin"]))+1
         kwargs["target"].health-=dmg
         if "on hurt" in kwargs["target"].passives:
-            kwargs["target"].passives["on hurt"](origin=kwargs["origin"],target=kwargs["target"],damage=dmg)
+            kwargs["target"].passives["on hurt"](origin=kwargs["origin"],target=kwargs["target"],player=kwargs["player"],damage=dmg)
     return False
 
 def start_of_turn():
@@ -645,7 +658,7 @@ sword=r'Item("Sword",1,sword_slash,r"Sprites\Sword.png",(0,0),r"Cut Sprites\Swor
 zombie=r'Mob("Zombie",2,4,[],[bite],{"on hurt":undead},{},"undead","cavern","blue",r"Sprites\Zombie.png",(0,0),r"Cut Sprites\Zombie.png",[(987,512,1323,579)])'
 #Mob()
 
-decklist={guardian:15, zombie:15}
+decklist={zombie:15, egg_rain:15}
 #playername=input("Enter your name: ")
 playername="J1"
 player1=Player(playername,1,(fields_anchor[0],y_rails[1]+cut_dim[1]+card_spacing_y),[(x_rails[0],y_rails[1]),(x_rails[1],y_rails[1]),(x_rails[2],y_rails[1])])
