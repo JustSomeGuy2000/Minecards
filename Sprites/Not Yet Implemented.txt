@@ -1,16 +1,7 @@
-Frog (semi)
-Horse
-Loot Chest
-Muddy Pig
-Pufferfish
-Satoru Gojo
+Frog (can't test item stealing)
 Sheep
-Shield
-Skeleton
 Slime
-Spider
 Sunken
-Sword
 Toji
 Trident
 Witch

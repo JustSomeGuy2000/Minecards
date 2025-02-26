@@ -17,7 +17,7 @@ type Attack_params = dict[Literal["origin"]:Card,Literal["target"]:Card,Literal[
 #None values mean add later
 
 class Mob(sprite.Sprite):
-    def __init__(self,name:str,cost:int,health:int,abilities:list[Ability],attacks:list[Callable],passives:dict[Literal["end of turn","start of turn","on death","on hurt","on attack","when played"],Callable],items:dict[Literal["end of turn","start of turn","on death","on hurt","on attack","when played"],Item],mob_class:Literal["undead","arthropod","aquatic","human","misc"],biome:Literal["plains","cavern","ocean","swamp"],border:Literal["blue","pink"],sprite:Path,init_pos:Coord,cut_sprite:Path,move_positions:list[tuple[int,int,int,int]],**kwargs):
+    def __init__(self,name:str,cost:int,health:int,abilities:list[Ability],attacks:list[Callable],passives:dict[Literal["end of turn","start of turn","on death","on hurt","on attack","when played","on this turn"],Callable],items:dict[Literal["end of turn","start of turn","on death","on hurt","on attack","when played","on this turn"],Item],mob_class:Literal["undead","arthropod","aquatic","human","misc"],biome:Literal["plains","cavern","ocean","swamp"],border:Literal["blue","pink"],sprite:Path,init_pos:Coord,cut_sprite:Path,move_positions:list[tuple[int,int,int,int]],**kwargs):
         super().__init__()
         #MOB INFO
         self.name=name
@@ -194,7 +194,7 @@ class Item(sprite.Sprite):
         elif self.targets == "player2 field":
             tempt=player2.field
         elif self.targets == "whole field":
-            tempt=whole_field
+            tempt=[whole_field]
         elif self.targets == "all on field":
             tempt=player1.field + player2.field
         elif self.targets == "all healable":
@@ -278,7 +278,7 @@ class Player():
             target.rect.x, target.rect.y=self.field_pos[pos-1]
             if not ignore_cost:
                 self.souls -= target.cost
-        elif type(target) == Item and self.field[pos-1] != None:
+        elif type(target) == Item:
             if target.condition != "when played":
                 self.field[pos-1].items[target.condition]=target
                 target.switch_sprite("cut")
@@ -321,7 +321,7 @@ class Ability():
         elif self.targets == "player2 field":
             tempt=player2.field
         elif self.targets == "whole field":
-            tempt=whole_field
+            tempt=[whole_field]
         elif self.targets == "all on field":
             tempt=player1.field + player2.field
         elif self.targets == "all healable":
@@ -347,27 +347,48 @@ def deckbuilder(list_to_use:dict[Card,int]) -> list[Card]:
 
 def atk_check(func) -> bool: #decorator that applies to all attacks, first decorator layer
     def atk_wrapper(**kwargs):
-        if "Egg Rain" not in [item.name for item in list(kwargs["origin"].items.values())]: #egg rain
-            result=func(**kwargs)
-            if kwargs["origin"] in player2.field: #quick strike
-                for mob in player1.field:
-                    if mob.name == "Horse":
+        global markers
+        if kwargs["noattack"] == False and "Egg Rain" not in [item.name for item in list(kwargs["origin"].items.values())]: #egg rain
+            result=list(func(**kwargs))
+            if markers["forage"] > 1: #forage
+                markers["forage"] -= 1
+            elif markers["forage"] == 1:
+                result[1] += 1
+                markers["forage"]=False
+            if len(result) == 2:
+                result.append([kwargs["target"]])
+            for card in result[2]:
+                card.health -= result[1]
+                if kwargs["origin"] in player2.field: #quick strike
+                    for mob in [mob for mob in player1.field if (mob != None and mob.name == "Horse")]:
                         kwargs["origin"].health -= 1
                         if "on hurt" in kwargs["origin"].passives:
-                            kwargs["origin"].passives["on hurt"](origin=mob,target=kwargs["target"],damage=1)
-            return result
+                            kwargs["origin"].passives["on hurt"](origin=mob,target=card,damage=1)
+                        if "on hurt" in card.items:
+                            card.items["on hurt"].effect(origin=kwargs["origin"],target=card,player=kwargs["player"],damage=1)
+                            card.items["on hurt"].uses-=1
+                            if card.items["on hurt"].uses == 0:
+                                del card.items["on hurt"]
+                if "on hurt" in card.passives and result[1] != 0:
+                    card.passives["on hurt"](origin=kwargs["origin"],target=card,player=kwargs["player"],damage=result[1])
+                if "on hurt" in card.items and result[1] != 0:
+                    card.items["on hurt"].effect(origin=kwargs["origin"],target=card,player=kwargs["player"],damage=result[1])
+                    card.items["on hurt"].uses-=1
+                    if card.items["on hurt"].uses == 0:
+                        del card.items["on hurt"]
+            return result[0]
         else:
-            return func(origin=kwargs["origin"],target=kwargs["target"],player=kwargs["player"],noattack=True)
+            return func(origin=kwargs["origin"],target=kwargs["target"],player=kwargs["player"],noattack=True)[0]
     return atk_wrapper
 
 def psv_check(func): #decorator that applies to all passives, first decorator layer
     def psv_wrapper(**kwargs):
         opp=None
-        if kwargs["target"] in player2.field:
+        if kwargs["origin"] in player1.field:
             opp=player2
         else:
             opp=player1
-        match=kwargs["player"].field[opp.field.index(kwargs["target"])]
+        match=opp.field[kwargs["player"].field.index(kwargs["origin"])]
         if match != None and match.name == "Frog": #tongue snare
             result=None
         else:
@@ -390,13 +411,19 @@ def abl_check(func):  #decorator that applies to all abilities, first decorator 
         return result
     return abl_wrapper
 
+def itm_check(func): #decorator that applies to all items, first decorator layer
+    def itm_wrapper(**kwargs):
+        if type(kwargs["target"]) != list:
+            result=func(**kwargs)
+        return result
+    return itm_wrapper
+
 @atk_check
-def bite(**kwargs:Attack_params) -> Literal[True]: #attack
+def bite(**kwargs:Attack_params) -> tuple[Literal[True],Literal[2]]: #attack
+    dmg=0
     if kwargs["noattack"] == False:
-        kwargs["target"].health-=2
-        if "on hurt" in kwargs["target"].passives:
-            kwargs["target"].passives["on hurt"](origin=kwargs["origin"],target=kwargs["target"],player=kwargs["player"],damage=2)
-    return True
+        dmg=2
+    return True, dmg
 
 def bread_heal(**kwargs): #item
     kwargs["target"].heal(2)
@@ -407,17 +434,15 @@ def cake_heal(**kwargs): #item
             card.heal(1)
 
 @atk_check
-def drown(**kwargs:Attack_params): #attack
+def drown(**kwargs:Attack_params) -> tuple[Literal[True],int]: #attack
+    dmg=0
     if kwargs["noattack"] == False:
         if kwargs["target"].mob_class == "aquatic" or kwargs["target"].status["aquatised"] > 0:
             dmg=3
         else:
             dmg=2
-        kwargs["target"].health-=dmg
-        if "on hurt" in kwargs["target"].passives:
-            kwargs["target"].passives["on hurt"](origin=kwargs["origin"],target=kwargs["target"],player=kwargs["player"],damage=dmg)
     kwargs["target"].status["aquatised"] = 2
-    return True
+    return True, dmg
 
 @psv_check
 def elders_curse(**kwargs): #passive: end of turn
@@ -434,7 +459,8 @@ def elders_curse(**kwargs): #passive: end of turn
         targets=player2.field
 
 @atk_check
-def eye_laser(**kwargs:Attack_params) -> Literal[False]: #attack
+def eye_laser(**kwargs:Attack_params) -> tuple[Literal[False],int]: #attack
+    dmg=0
     if kwargs["noattack"] == False:
         if kwargs["player"].player_number == 1:
             opp=player2
@@ -443,15 +469,25 @@ def eye_laser(**kwargs:Attack_params) -> Literal[False]: #attack
         dmg=1
         if kwargs["player"].field.index(kwargs["origin"])-opp.field.index(kwargs["target"]) != 0:
             dmg+=1
-        kwargs["target"].health-=dmg
-        if "on hurt" in kwargs["target"].passives:
-            kwargs["target"].passives["on hurt"](origin=kwargs["origin"],target=kwargs["target"],player=kwargs["player"],damage=dmg)
-    return False
+    return False, dmg
+
+@psv_check
+def forage(**kwargs): #passive: on this turn
+    global markers
+    markers["forage"]=3
 
 def goat_horn_bounce(**kwargs): #item
     player2.hand.append(kwargs["target"].reset())
     player2.field[player2.field.index(kwargs["target"])]=None
     kwargs["target"].switch_sprite("back")
+
+@psv_check
+def infinity(**kwargs): #passive: on hurt
+    kwargs["target"].health+=kwargs["damage"]-1
+
+def loot_chest_draw(**kwargs): #item
+    for i in range(2):
+        kwargs["player"].hand.append(deck.pop())
 
 def milk_cleanse(**kwargs): #item
     kwargs["target"].items={}
@@ -471,10 +507,22 @@ def milk_share(**kwargs) -> bool: #ability
 def mystery_egg(**kwargs): #passive: on this turn
     kwargs["player"].hand.append(deck.pop())
 
+@abl_check
+def nah_id_win(**kwargs): #ability
+    if kwargs["player"].player_number == 1:
+        opp=player2
+    else:
+        opp=player1
+    opp.souls -= 3
+
 @psv_check
 def play_dead(**kwargs): #passive: on death
     kwargs["origin"].switch_sprite("front")
     kwargs["player"].hand.append(kwargs["origin"])
+
+@psv_check
+def porous_body(**kwargs):
+    pass
 
 @abl_check
 def prime(**kwargs): #ability
@@ -497,21 +545,40 @@ def prime(**kwargs): #ability
                     card.passives["on hurt"](origin=kwargs["origin"],target=card,damage=3)
         kwargs["origin"].health=0
 
-@atk_check
-def rush(**kwargs:Attack_params) -> Literal[True]: #attack
-    if kwargs["noattack"] == False:
-        kwargs["target"].health-=1
-        if "on hurt" in kwargs["target"].passives:
-            kwargs["target"].passives["on hurt"](origin=kwargs["origin"],target=kwargs["target"],player=kwargs["player"],damage=1)
-    return True
+def puffer_poison(**kwargs): #item
+    for card in [card for card in player2.field if card != None]:
+        card.status["psn"] += 1
 
 @atk_check
-def snipe(**kwargs:Attack_params) -> Literal[False]: #attack
+def purple(**kwargs:Attack_params) -> tuple[Literal[False],int,list[Card]]: #attack
+    dmg=0
     if kwargs["noattack"] == False:
-        kwargs["target"].health-=1
-        if "on hurt" in kwargs["target"].passives:
-            kwargs["target"].passives["on hurt"](origin=kwargs["origin"],target=kwargs["target"],player=kwargs["player"],damage=1)
-    return False
+        dmg=3
+    return False, dmg, [card for card in player1.field+player2.field if card != None]
+
+@atk_check
+def rush(**kwargs:Attack_params) -> tuple[Literal[True],int]: #attack
+    dmg=0
+    if kwargs["noattack"] == False:
+        dmg=1
+    return True, dmg
+
+def shield_protect(**kwargs): #item
+    kwargs["target"].health+=kwargs["damage"]
+
+@atk_check
+def snipe(**kwargs:Attack_params) -> tuple[Literal[False],int]: #attack
+    dmg=0
+    if kwargs["noattack"] == False:
+        dmg=1
+    return False, dmg
+
+@atk_check
+def spider_bite(**kwargs:Attack_params) -> tuple[Literal[True],int]: #attack
+    dmg=0
+    if kwargs["noattack"] == False:
+        dmg=len([mob for mob in kwargs["player"].field if (mob != None and mob.mob_class == "arthropod")])
+    return True, dmg
 
 @psv_check
 def spore(**kwargs): #passive: on death
@@ -532,20 +599,19 @@ def thorn_body(**kwargs): #passive: on hurt
     kwargs["origin"].health-=1
 
 @atk_check
-def tongue_whip(**kwargs) -> Literal[True]: #attack
+def tongue_whip(**kwargs) -> tuple[Literal[True],int]: #attack
     global until_end
     global selected
     global targets
     global markers
+    dmg=0
     if kwargs["noattack"] == False:
-        kwargs["target"].health-=1
-        if "on hurt" in kwargs["target"].passives:
-            kwargs["target"].passives["on hurt"](origin=kwargs["origin"],target=kwargs["target"],player=kwargs["player"],damage=1)
+        dmg=1
         until_end += 1
         targets = kwargs["target"].items
         selected=kwargs["origin"]
         markers["item stealing"]=(True, kwargs["origin"])
-    return True
+    return True, dmg
 
 @psv_check
 def undead(**kwargs): #passive: on hurt
@@ -553,7 +619,8 @@ def undead(**kwargs): #passive: on hurt
         kwargs["origin"].health=1
 
 @atk_check
-def warding_laser(**kwargs:Attack_params) -> Literal[False]: #attack
+def warding_laser(**kwargs:Attack_params) -> tuple[Literal[False],int]: #attack
+    dmg=0
     if kwargs["noattack"] == False:
         opp=None
         if kwargs["player"].player_number == 1:
@@ -561,10 +628,7 @@ def warding_laser(**kwargs:Attack_params) -> Literal[False]: #attack
         else:
             opp=player1
         dmg=abs(opp.field.index(kwargs["target"])-kwargs["player"].field.index(kwargs["origin"]))+1
-        kwargs["target"].health-=dmg
-        if "on hurt" in kwargs["target"].passives:
-            kwargs["target"].passives["on hurt"](origin=kwargs["origin"],target=kwargs["target"],player=kwargs["player"],damage=dmg)
-    return False
+    return False, dmg
 
 def start_of_turn():
     for card in player1.field:
@@ -609,7 +673,6 @@ x_rails=[fields_anchor[0],fields_anchor[0]+cut_dim[0]+card_spacing_x,fields_anch
 hearts_rails=[y_rails[0]+cut_dim[0]+10,y_rails[1]-10-20] #0: player 2, 1: player 1
 game_overs=("win", "tie", "lose")
 PORT=6543
-whole_field=Rect(fields_anchor[0],fields_anchor[1],3*cut_dim[0]+3*card_spacing_x,2*cut_dim[1]+card_dim_rot[1]+2*card_spacing_y)
 effect_sprites={"psn":image.load("psn.png"),"aquatised":transform.scale(image.load("aquatised.png"),(23,23))}
 
 #variables
@@ -625,7 +688,7 @@ postsubturn=1 #postsubturn numbers start from 2
 attack_choosing_state=False
 HOST=''
 sock=''
-markers={"retry":False, "deck built":False, "do not connect":True, "start of turn called":False, "not enough souls":[0,0,0,0], "data received, proceed":False, "just chose":False, "finishable":True, "freeze":False, "fade":[0,[0,0,0],0,0,0], "game over called":False,"start of move called":False,"item stealing":(False, None)}
+markers={"retry":False, "deck built":False, "do not connect":True, "start of turn called":False, "not enough souls":[0,0,0,0], "data received, proceed":False, "just chose":False, "finishable":True, "freeze":False, "fade":[0,[0,0,0],0,0,0], "game over called":False,"start of move called":False,"item stealing":(False, None),"forage":False}
 selected=None #card displayed on the side
 selected_move=None #move that has been selected
 attack_progressing=False #is it the attack target choosing stage
@@ -638,6 +701,7 @@ ability_selected=False
 #Note: cards for deck use are defined by deckbuilder(), which takes these strings and eval()s them into objects
 #This is so each deck entry has a separate memory value
 deck_plc=Item("Deck Placeholder",0,None,"card_back_rot.png",(100,262),"card_back_rot.png",None,card_dim_rot,'',None,None)
+whole_field=Item("THE ENTIRE FIELD!!!",0,nofunction_item,r"Sprites\Whole Field.png",(fields_anchor[0],fields_anchor[1]),r"Sprites\Whole Field.png","pink",(3*cut_dim[0]+3*card_spacing_x,2*cut_dim[1]+card_dim_rot[1]+2*card_spacing_y),None,None,None)
 axolotl=r'Mob("Axolotl",3,3,[],[bite],{"on death":play_dead},{},"aquatic","ocean","blue",r"Sprites\Axolotl.png",(0,0),r"Cut SPrites\Axolotl.png",[(987,512,1323,579)])'
 bogged=r'Mob("Bogged",3,3,[],[snipe],{"on death":spore},{},"undead","swamp","blue",r"Sprites\Bogged.webp",(0,0),r"Cut Sprites\Bogged.jpg",[(987,522,1323,579)])'
 bread=r'Item("Bread",1,bread_heal,r"Sprites\Bread.png",(0,0),r"Cut Sprites\Bread.png","blue",card_dim,"when played",1,"all healable")'
@@ -653,12 +717,19 @@ frog=r'Mob("Frog",2,3,[],[tongue_whip],{},{},"aquatic","swamp","blue",r"Sprites\
 goat_horn=r'Item("Goat Horn",3,goat_horn_bounce,r"Sprites\Goat Horn.png",(0,0),r"Cut Sprites\Goat Horn.png","pink",card_dim,"when played",1,"special: goat horn")'
 guardian=r'Mob("Guardian",4,3,[],[eye_laser],{"on hurt":thorn_body},{},"aquatic","ocean","blue",r"Sprites\Guardian.png",(0,0),r"Cut Sprites\Guardian.png",[(987,502,1323,569)])'
 horse=r'Mob("Horse",4,5,[],[bite],{},{},"misc","plains","pink",r"Sprites\Horse.png",(0,0),r"Cut Sprites\Horse.png",[(987,512,1323,579)])'
+loot_chest=r'Item("Loot Chest",0,loot_chest_draw,r"Sprites\Loot Chest.png",(0,0),r"Cut Sprites\Loot Chest.png","blue",card_dim,"when played",1,"whole field")'
 milk=r'Item("Milk",2,milk_cleanse,r"Sprites\Milk.png",(0,0),r"Cut Sprites\Milk.png","blue",card_dim,"when played",1,"player1 field")'
+muddy_pig=r'Mob("Muddy Pig",2,3,[],[rush],{"on this turn":forage},{},"misc","plains","blue",r"Sprites\Muddy Pig.png",(0,0),r"Cut Sprites\Muddy Pig.png",[(987,512,1323,579)])'
+pufferfish=r'Item("Pufferfish",2,puffer_poison,r"Sprites\Pufferfish.png",(0,0),r"Cut Sprites\Pufferfish.png","blue",card_dim,"when played",1,"whole field")'
+satoru_gojo=r'Mob("Satoru Gojo",9,20,[Ability(0,nah_id_win,"whole field")],[purple],{"on hurt":infinity},{},"misc","plains","pink",r"Sprites\Satoru Gojo.png",(0,0),r"Cut Sprites\Satoru Gojo.png",[(987,502,1323,554),(987,554,1323,614)])'
+shield=r'Item("shield",2,shield_protect,r"Sprites\Shield.png",(0,0),r"Cut Sprites\Shield.png","blue",card_dim,"on hurt",1,"player1 field")'
+skeleton=r'Mob("Skeleton",2,3,[],[snipe],{"on hurt":undead},{},"undead","cavern","blue",r"Sprites\Skeleton.png",(0,0),r"Cut Sprites\Skeleton.png",[(987,512,1323,569)])'
+spider=r'Mob("Spider",1,2,[],[spider_bite],{},{},"arthropod","cavern","blue",r"Sprites\Spider.png",(0,0),r"Cut Sprites\Spider.png",[(987,512,1323,569)])'
 sword=r'Item("Sword",1,sword_slash,r"Sprites\Sword.png",(0,0),r"Cut Sprites\Sword.png","blue",card_dim,"on attack",1,"player1 field")'
 zombie=r'Mob("Zombie",2,4,[],[bite],{"on hurt":undead},{},"undead","cavern","blue",r"Sprites\Zombie.png",(0,0),r"Cut Sprites\Zombie.png",[(987,512,1323,579)])'
 #Mob()
 
-decklist={zombie:15, egg_rain:15}
+decklist={spider:15, shield:15}
 #playername=input("Enter your name: ")
 playername="J1"
 player1=Player(playername,1,(fields_anchor[0],y_rails[1]+cut_dim[1]+card_spacing_y),[(x_rails[0],y_rails[1]),(x_rails[1],y_rails[1]),(x_rails[2],y_rails[1])])
@@ -737,7 +808,7 @@ while running:
                 if move_hovering_over != None:
                     if type(selected) == Mob and move_hovering_over[0].collidepoint(pos) and player1.field.index(selected) == subturn-1:
                         selected_move=move_hovering_over[1]
-                        if type(move_hovering_over[1]) != Ability:
+                        if type(selected_move) != Ability:
                             targets=player2.field
                         else:
                             if player1.souls >= selected_move.cost:
@@ -810,6 +881,8 @@ while running:
                                     player2.add_to_field(None,player2.field.index(card)+1,ignore_cost=True,card_override=selected,pos_override=card)
                                     player1.hand.pop(player1.hand.index(selected))
                                     player1.souls -= selected.cost
+                                if targets == [whole_field]:
+                                    player1.add_to_field(0,0,False,card_override=selected,pos_override=card)
                                 if postsubturn == 1 and setup == False:
                                     abs_subturn += 1
                                     markers["start of move called"]=False
@@ -866,7 +939,7 @@ while running:
                 attack_choosing_state=False
                 HOST=''
                 sock=''
-                markers={"retry":False, "deck built":False, "do not connect":True, "start of turn called":False, "not enough souls":[0,0,0,0], "data received, proceed":False, "just chose":False, "finishable":True, "freeze":False, "game over called":False, "fade":[0,[0,0,0],0,0,0], "start of move called":False,"item stealing":(False, None)}
+                markers={"retry":False, "deck built":False, "do not connect":True, "start of turn called":False, "not enough souls":[0,0,0,0], "data received, proceed":False, "just chose":False, "finishable":True, "freeze":False, "game over called":False, "fade":[0,[0,0,0],0,0,0], "start of move called":False,"item stealing":(False, None),"forage":False}
                 selected=None
                 selected_move=None
                 attack_progressing=False
@@ -950,6 +1023,7 @@ while running:
         if not markers["do not connect"]:
             screen.blit(game_plc_text,(window_dim[0]/2-mjgs.size("Await further programming")[0]/2,window_dim[1]/2))
         screen.blit(deck_plc.current_sprite,(deck_plc.rect.x,deck_plc.rect.y))
+        screen.blit(whole_field.current_sprite,(fields_anchor[0],fields_anchor[1]))
         if selected != None:
             large_image=transform.scale(image.load(selected.original_sprite),(card_dim[0]*3,card_dim[1]*3))
             draw.rect(screen,ORANGE,Rect(selected.rect.x-5,selected.rect.y-5,selected.rect.width+10,selected.rect.height+10),5)
@@ -1010,7 +1084,7 @@ while running:
         if postsubturn == 1:
             draw.rect(screen,(255,255,255),Rect(player1.field_pos[subturn-1][0],player1.field_pos[subturn-1][1]+cut_dim[1]+10,cut_dim[0],10))
             if markers["start of move called"] == False and player1.field[subturn-1] != None and "on this turn" in player1.field[subturn-1].passives:
-                player1.field[subturn-1].passives["on this turn"](player=player1,origin=player1.field_pos[subturn-1])
+                player1.field[subturn-1].passives["on this turn"](player=player1,origin=player1.field[subturn-1])
                 markers["start of move called"]=True
         else:
             draw.rect(screen,(255,255,255),Rect(player1.field_pos[postsubturn-2][0],player1.field_pos[postsubturn-2][1]+cut_dim[1]+10,cut_dim[0],10))
@@ -1018,7 +1092,7 @@ while running:
         player2.update()
         for card in targets:
             if card != None:
-                temp=Rect(card.rect.x,card.rect.y,cut_dim[0],cut_dim[1])
+                temp=Rect(card.rect.x,card.rect.y,card.rect.width,card.rect.height)
                 draw.rect(screen,ORANGE,temp,5)
                 draw.rect(screen,(255,255,255),Rect(temp.centerx-20,temp.centery-5,40,10))
                 draw.rect(screen,(255,255,255),Rect(temp.centerx-5,temp.centery-20,10,40))
