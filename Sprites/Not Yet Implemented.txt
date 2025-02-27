@@ -1,7 +1,2 @@
 Frog (can't test item stealing)
 Sheep
-Slime
-Sunken
-Toji
-Trident
-Witch
