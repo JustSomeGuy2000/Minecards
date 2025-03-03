@@ -1226,10 +1226,10 @@ while running:
             screen.blit(game_plc_text,(window_dim[0]/2-mjgs.size("Await further programming")[0]/2,window_dim[1]/2))
         screen.blit(deck_plc.current_sprite,(deck_plc.rect.x,deck_plc.rect.y))
         screen.blit(whole_field.current_sprite,(fields_anchor[0],fields_anchor[1]))
-        if abs_subturn == 0 or setup == True:
+        if setup == True or abs_subturn > 2:
             screen.blit(subturn_sprites[0],(760,210))
         else:
-            screen.blit(subturn_sprites[abs_subturn],(760,210))
+            screen.blit(subturn_sprites[abs_subturn+1],(760,210))
         if selected != None:
             large_image=transform.scale(image.load(selected.original_sprite),(card_dim[0]*3,card_dim[1]*3))
             draw.rect(screen,ORANGE,Rect(selected.rect.x-5,selected.rect.y-5,selected.rect.width+10,selected.rect.height+10),5)
@@ -1242,7 +1242,7 @@ while running:
                 draw.rect(screen,(255,255,255),Rect(temp.centerx-5,temp.centery-20,10,40))
         if postsubturn >= 2:
             skippost=True
-            if player1.field[postsubturn-2] != None:
+            if postsubturn < 5 and player1.field[postsubturn-2] != None:
                 if "end of turn" in player1.field[postsubturn-2].passives:
                     player1.field[postsubturn-2].passives["end of turn"](origin=player1.field[postsubturn-2],player=player1)
                     skippost=False
@@ -1259,9 +1259,9 @@ while running:
                 hand_cost.append(99)
         if min(hand_cost) >= player1.souls and setup == True:
             abs_subturn += 1
-        if postsubturn >= 4 and setup == False:
+        if postsubturn >= 5 and setup == False:
             subturn = 1
-            abs_subturn = 1
+            abs_subturn = 0
             postsubturn = 1
             turn += 1
             markers["start of turn called"] = False
