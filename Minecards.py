@@ -836,6 +836,7 @@ game_overs=("win", "tie", "lose")
 PORT=6543
 effect_sprites={"psn":image.load("psn.png"),"aquatised":transform.scale(image.load("aquatised.png"),(23,23))}
 monkey_sprite=transform.scale(image.load("monkey.png"),(840*(window_dim[1]/859),window_dim[1]))
+subturn_sprites=[transform.scale(image.load("abs_subturn_none.png"),(150,360)),transform.scale(image.load("abs_subturn_1.webp"),(150,360)),transform.scale(image.load("abs_subturn_2.webp"),(150,360)),transform.scale(image.load("abs_subturn_3.png"),(150,360))]
 
 #variables
 running=True
@@ -1225,6 +1226,10 @@ while running:
             screen.blit(game_plc_text,(window_dim[0]/2-mjgs.size("Await further programming")[0]/2,window_dim[1]/2))
         screen.blit(deck_plc.current_sprite,(deck_plc.rect.x,deck_plc.rect.y))
         screen.blit(whole_field.current_sprite,(fields_anchor[0],fields_anchor[1]))
+        if abs_subturn == 0 or setup == True:
+            screen.blit(subturn_sprites[0],(760,210))
+        else:
+            screen.blit(subturn_sprites[abs_subturn],(760,210))
         if selected != None:
             large_image=transform.scale(image.load(selected.original_sprite),(card_dim[0]*3,card_dim[1]*3))
             draw.rect(screen,ORANGE,Rect(selected.rect.x-5,selected.rect.y-5,selected.rect.width+10,selected.rect.height+10),5)
@@ -1312,7 +1317,7 @@ while running:
                 markers["fade"]=[60,[10,220,70],255,0,0]
                 markers["fade"][4]=markers["fade"][2]/markers["fade"][0]
                 markers["game over called"]=True
-        screen.blit(mjgs.render(f"{str(abs_subturn)}, {str(subturn)}",True,(255,255,255)),(0,0))
+        screen.blit(mjgs.render(f"Abs:{str(abs_subturn)}, Sub:{str(subturn)}",True,(255,255,255)),(0,0))
 
     colourval = markers["fade"][1]+[markers["fade"][3]]
     temps=Surface(window_dim)
