@@ -16,6 +16,9 @@ type Attack_params = dict[Literal["origin"]:Card,Literal["target"]:Card,Literal[
 #Name:LAPTOP-20C14P7N, Address:172.20.57.66
 #None values mean add later
 
+window_dim=(1500,850)
+screen=display.set_mode(window_dim)
+
 class Mob(sprite.Sprite):
     def __init__(self,name:str,cost:int,health:int,abilities:list[Ability],attacks:list[Callable],passives:dict[Literal["end of turn","start of turn","on death","on hurt","on attack","when played","on this turn","always","end this turn"],Callable],items:dict[Literal["end of turn","start of turn","on death","on hurt","on attack","when played","on this turn"],Item],mob_class:Literal["undead","arthropod","aquatic","human","misc"],biome:Literal["plains","cavern","ocean","swamp"],border:Literal["blue","pink"],sprite:Path,init_pos:Coord,cut_sprite:Path,move_positions:list[tuple[int,int,int,int]],**kwargs):
         super().__init__()
@@ -42,10 +45,10 @@ class Mob(sprite.Sprite):
         self.proxy_for=None
         self.proxy=None
         #SPRITE AND COORDS
-        self.front_sprite=transform.scale(image.load(sprite),card_dim)
+        self.front_sprite=transform.scale(image.load(sprite),card_dim).convert()
         self.original_sprite=sprite
-        self.cut_sprite=transform.scale(image.load(cut_sprite),cut_dim)
-        self.back_sprite=transform.scale(image.load(cardback),card_dim)
+        self.cut_sprite=transform.scale(image.load(cut_sprite),cut_dim).convert()
+        self.back_sprite=transform.scale(image.load(cardback),card_dim).convert()
         self.current_sprite=self.front_sprite
         self.rect=self.current_sprite.get_rect()
         self.rect.x=init_pos[0]
@@ -66,6 +69,7 @@ class Mob(sprite.Sprite):
 
     def update(self):
         global move_hovering_over
+        global setup
         if self.timer!=0:
             self.rect.x+=self.velocity[0]
             self.rect.y+=self.velocity[1]
@@ -79,7 +83,7 @@ class Mob(sprite.Sprite):
             self.times=[]
             self.movement_phase=0
         for position in self.move_positions:
-            if selected == self and position.collidepoint(mouse.get_pos()) and not attack_progressing and self == player1.field[subturn-1]:
+            if selected == self and position.collidepoint(mouse.get_pos()) and not attack_progressing and self == player1.field[subturn-1] and setup == False:
                 draw.rect(screen,ORANGE,position,5)
                 if self.move_positions.index(position) < len(self.moveset):
                     move_hovering_over=(position,self.moveset[self.move_positions.index(position)])
@@ -135,10 +139,10 @@ class Item(sprite.Sprite):
         self.uses=uses
         self.targets=targets
         #SPRITE AND COORDS
-        self.front_sprite=transform.scale(image.load(sprite),dimensions)
+        self.front_sprite=transform.scale(image.load(sprite),dimensions).convert_alpha()
         self.original_sprite=sprite
-        self.cut_sprite=transform.scale(image.load(cut_sprite),item_dim)
-        self.back_sprite=transform.scale(image.load(cardback),card_dim)
+        self.cut_sprite=transform.scale(image.load(cut_sprite),item_dim).convert()
+        self.back_sprite=transform.scale(image.load(cardback),card_dim).convert()
         self.current_sprite=self.front_sprite
         self.rect=self.current_sprite.get_rect()
         self.rect.x=init_pos[0]
@@ -230,6 +234,7 @@ class Player():
             self.souls_pos=(field_pos[2][0]+cut_dim[0]+10,50)
 
     def update(self):
+        global abs_subturn
         for i in range(len(self.hand)):
             if self.player_number==2:
                 self.hand[i].switch_sprite("back")
@@ -260,6 +265,8 @@ class Player():
                         if card.proxy_for != None:
                             card.proxy_for.proxy=None
                         self.field[self.field.index(card)]=None
+                        if self.player_number == 1:
+                            abs_subturn -= 1
                 if "always" in card.passives:
                     card.passives["always"](origin=card,player=self)
         screen.blit(soul,self.souls_pos)
@@ -810,20 +817,19 @@ def start_of_turn():
                 del card.items["start of turn"]
 
 #constants
-window_dim=(1500,850)
-title_img=transform.scale(image.load("title.png"),(842,120))
+title_img=transform.scale(image.load("title.png"),(842,120)).convert_alpha()
 card_dim=(150,225)
 card_dim_rot=(225,150)
 cut_dim=(169,172)
 item_dim=(75,75)
 token_dim=(30,30)
-soul=transform.scale(image.load("soul.png"),token_dim)
+soul=transform.scale(image.load("soul.png"),token_dim).convert()
 ORANGE = (255,180,0)
 SOUL_COLOUR=(255,255,255)
 starting_cards=5
 drawing_cards=2
 cardback="card_back.png"
-background=transform.scale(image.load("background.png"),window_dim)
+background=transform.scale(image.load("background.png"),window_dim).convert()
 FPS=60
 clock=time.Clock()
 fields_anchor=(90,40)
@@ -834,9 +840,9 @@ x_rails=[fields_anchor[0],fields_anchor[0]+cut_dim[0]+card_spacing_x,fields_anch
 hearts_rails=[y_rails[0]+cut_dim[0]+10,y_rails[1]-10-20] #0: player 2, 1: player 1
 game_overs=("win", "tie", "lose")
 PORT=6543
-effect_sprites={"psn":image.load("psn.png"),"aquatised":transform.scale(image.load("aquatised.png"),(23,23))}
-monkey_sprite=transform.scale(image.load("monkey.png"),(840*(window_dim[1]/859),window_dim[1]))
-subturn_sprites=[transform.scale(image.load("abs_subturn_none.png"),(150,360)),transform.scale(image.load("abs_subturn_1.webp"),(150,360)),transform.scale(image.load("abs_subturn_2.webp"),(150,360)),transform.scale(image.load("abs_subturn_3.png"),(150,360))]
+effect_sprites={"psn":image.load("psn.png").convert_alpha(),"aquatised":transform.scale(image.load("aquatised.png"),(23,23)).convert()}
+monkey_sprite=transform.scale(image.load("monkey.png"),(840*(window_dim[1]/859),window_dim[1])).convert_alpha()
+subturn_sprites=[transform.scale(image.load("abs_subturn_none.png"),(150,360)).convert(),transform.scale(image.load("abs_subturn_1.webp"),(150,360)).convert(),transform.scale(image.load("abs_subturn_2.webp"),(150,360)).convert(),transform.scale(image.load("abs_subturn_3.png"),(150,360)).convert()]
 
 #variables
 running=True
@@ -905,7 +911,6 @@ playername="J1"
 player1=Player(playername,1,(fields_anchor[0],y_rails[1]+cut_dim[1]+card_spacing_y),[(x_rails[0],y_rails[1]),(x_rails[1],y_rails[1]),(x_rails[2],y_rails[1])])
 player2:Player=''
 
-screen=display.set_mode(window_dim)
 display.set_caption("Minecards")
 
 font.init()
@@ -1231,7 +1236,7 @@ while running:
         else:
             screen.blit(subturn_sprites[abs_subturn+1],(760,210))
         if selected != None:
-            large_image=transform.scale(image.load(selected.original_sprite),(card_dim[0]*3,card_dim[1]*3))
+            large_image=transform.scale(image.load(selected.original_sprite),(card_dim[0]*3,card_dim[1]*3)).convert()
             draw.rect(screen,ORANGE,Rect(selected.rect.x-5,selected.rect.y-5,selected.rect.width+10,selected.rect.height+10),5)
             screen.blit(large_image,(930,100))
         for i in range(3):
@@ -1363,18 +1368,12 @@ while running:
         iii. Send and receive data
         iv. Action phase, you attack, opponent counters, opponent attacks, you counter. Alternatively, a card is placed
     3. Figure out animations: card going from hand to field, card attacking, start of turn animations
-    4. Implement subturn indicator
-    5. Implement putting multiple items of the same type onto mobs
-    6. Does item application count as a subturn?
-    7. Make quick strike a call to an attack instead of a messy code block inside atk_check
-    8. Move item use depletion into itm_check instead of being called wherever an item is
-    9. Draw line from proxy field slot to proxy
-    10. Get item stealing to work
-
-    Bugs:
-    1. Turn system is absolutely messed up (especially, if there are 3 elders, the third somehow takes another turn after the post-turn period). And aside from the first turn, other turns completely ignore the 1st field card. This, I suppose, is what I get for tweaking the turn changing code so much to accommodate every edge case.
-    2. Can click moves while in setup phase and targeting appears, although the moves themselves don't go through
-    3. Selected marker does not move automatically after a move completes
+    4. Implement putting multiple items of the same type onto mobs
+    5. Does item application count as a subturn?
+    6. Make quick strike a call to an attack instead of a messy code block inside atk_check
+    7. Move item use depletion into itm_check instead of being called wherever an item is
+    8. Get item stealing to work
+    9. Line 1238: don't constantly load images, only do it when selected changes
 
     Conditions:
     "end of turn": Called at the end of the attack phase
