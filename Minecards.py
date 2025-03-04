@@ -853,6 +853,7 @@ turn=0
 setup=True
 subturn=1 #subturn numbers start from 1, keeps track of which card should be attacking
 abs_subturn=1 #keeps track of how many subturns have passed
+abs_abs_subturn=1
 postsubturn=1 #postsubturn numbers start from 2
 attack_choosing_state=False
 HOST=''
@@ -1007,6 +1008,7 @@ while running:
                             player1.add_to_field(player1.hand.index(selected),i+1)
                             if setup == True:
                                 abs_subturn += 1
+                                abs_abs_subturn += 1
                         else:
                             if markers["not enough souls"][0] == 0 and min(hand_cost) >= player1.souls:
                                 markers["not enough souls"]=[6,5,0,0] #[amount of cycles,frames per cycle,current colour,frame number]
@@ -1044,8 +1046,9 @@ while running:
                                         player2.field[subturn-1].status["psn"] -= 1
                                 if postsubturn == 1 and setup == False:
                                     abs_subturn += 1
+                                    abs_abs_subturn += 1
                                     markers["start of move called"]=False
-                                if abs_subturn != 3:
+                                if abs_abs_subturn != 3:
                                     selected = player1.field[abs_subturn%len(filled_positions)]
                                 else:
                                     selected=player1.field[0]
@@ -1086,8 +1089,9 @@ while running:
                                             player2.field[subturn-1].status["psn"] -= 1
                                     if postsubturn == 1 and setup == False:
                                         abs_subturn += 1
+                                        abs_abs_subturn += 1
                                         markers["start of move called"]=False
-                                    if abs_subturn != 3:
+                                    if abs_abs_subturn != 3:
                                         selected = player1.field[abs_subturn%len(filled_positions)]
                                     else:
                                         selected=player1.field[0]
@@ -1142,6 +1146,7 @@ while running:
                 setup=True
                 subturn=1
                 abs_subturn=1
+                abs_abs_subturn=1
                 postsubturn=1
                 attack_choosing_state=False
                 HOST=''
@@ -1264,9 +1269,11 @@ while running:
                 hand_cost.append(99)
         if min(hand_cost) >= player1.souls and setup == True:
             abs_subturn += 1
+            abs_abs_subturn += 1
         if postsubturn >= 5 and setup == False:
             subturn = 1
             abs_subturn = 0
+            abs_abs_subturn = 0
             postsubturn = 1
             turn += 1
             markers["start of turn called"] = False
@@ -1276,10 +1283,11 @@ while running:
             for card in player2.field:
                 if card != None and card.status["aquatised"] > 0:
                     card.status["aquatised"] -= 1
-        if abs_subturn >= 4 and setup == True:
+        if abs_abs_subturn >= 4 and setup == True:
             setup=False
             subturn=1
             abs_subturn=0
+            abs_abs_subturn=0
             player1.souls=1
             player2.souls=1
         filled_positions={}
