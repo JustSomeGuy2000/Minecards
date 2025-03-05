@@ -2,10 +2,13 @@ from __future__ import annotations
 from pygame import *
 from collections.abc import Callable
 from typing import Literal
-import random as r
-import time as t
+from random import shuffle
+import time as tm
+import traceback as t
 import socket
 import select
+import sys
+import os
 from math import copysign
 
 type Card = Mob|Item
@@ -20,7 +23,7 @@ window_dim=(1500,850)
 screen=display.set_mode(window_dim)
 
 class Mob(sprite.Sprite):
-    def __init__(self,name:str,cost:int,health:int,abilities:list[Ability],attacks:list[Callable],passives:dict[Literal["end of turn","start of turn","on death","on hurt","on attack","when played","on this turn","always","end this turn"],Callable],items:dict[Literal["end of turn","start of turn","on death","on hurt","on attack","when played","on this turn"],Item],mob_class:Literal["undead","arthropod","aquatic","human","misc"],biome:Literal["plains","cavern","ocean","swamp"],border:Literal["blue","pink"],sprite:Path,init_pos:Coord,cut_sprite:Path,move_positions:list[tuple[int,int,int,int]],**kwargs):
+    def __init__(self,name:str,cost:int,health:int,abilities:list[Ability],attacks:list[Callable],passives:dict[Literal["end of turn","start of turn","on death","on hurt","on attack","when played","on this turn","always","end this turn"],Callable],items:dict[Literal["end of turn","start of turn","on death","on hurt","on attack","when played","on this turn"],list[Item]],mob_class:Literal["undead","arthropod","aquatic","human","misc"],biome:Literal["plains","cavern","ocean","swamp"],border:Literal["blue","pink"],sprite:Path,init_pos:Coord,cut_sprite:Path,move_positions:list[tuple[int,int,int,int]],**kwargs):
         super().__init__()
         #MOB INFO
         self.name=name
@@ -59,29 +62,49 @@ class Mob(sprite.Sprite):
         self.times=[]
         self.timer=0
         self.velocity=(0,0)
+        self.hurt_timer=0
+        self.hurt_surface=None
+        self.hurt_anchor=None
+        self.internal_coords=[init_pos[0],init_pos[1]]
+        self.rot=[0,0,0] #frames to rotate, final rotation angle, current frame
+        self.rot_sprite=None
 
     def startmove(self,dests:list[Coord],times:list[int]):
         if self.timer==0:
             self.destinations=dests
             self.times=times
             self.timer=self.times[self.movement_phase]
-            self.velocity=((self.destinations[self.movement_phase][0]-self.rect.x)/self.timer, (self.destinations[self.movement_phase][1]-self.rect.y)/self.timer)
+            self.velocity=((self.destinations[self.movement_phase][0]-self.internal_coords[0])/self.timer, (self.destinations[self.movement_phase][1]-self.internal_coords[1])/self.timer)
+            print(f"{self.velocity[0]*self.times[0]},{self.velocity[1]*self.times[0]}")
+
+    def startrot(self,angle:int,rot_time:int):
+        if self.rot[2] == 0:
+            if rot_time > 0:
+                self.rot=[rot_time,angle,0]
+            else:
+                self.current_sprite=transform.rotate(self.current_sprite,angle)
 
     def update(self):
         global move_hovering_over
         global setup
         if self.timer!=0:
-            self.rect.x+=self.velocity[0]
-            self.rect.y+=self.velocity[1]
+            self.internal_coords[0]+=self.velocity[0]
+            self.internal_coords[1]+=self.velocity[1]
             self.timer-=1
         elif self.timer == 0 and self.movement_phase != len(self.destinations)-1 and self.destinations != []:
             self.movement_phase += 1
             self.timer=self.times[self.movement_phase]
-            self.velocity=((self.destinations[self.movement_phase][0]-self.rect.x)/self.timer, (self.destinations[self.movement_phase][1]-self.rect.y)/self.timer)
+            self.velocity=((self.destinations[self.movement_phase][0]-self.internal_coords[0])/self.timer, (self.destinations[self.movement_phase][1]-self.internal_coords[1])/self.timer)
         else:
             self.destinations=[]
             self.times=[]
             self.movement_phase=0
+        if self.rot[2] == self.rot[0] and self.rot[0] != 0:
+            self.current_sprite=transform.rotate(self.current_sprite,self.rot[1])
+            self.rot=[0,0,0]
+        elif self.rot[0] != 0:
+            self.rot_sprite=transform.rotate(self.current_sprite,self.rot[1]/self.rot[0]*self.rot[2])
+            self.rot[2]+=1
         for position in self.move_positions:
             if selected == self and position.collidepoint(mouse.get_pos()) and not attack_progressing and self == player1.field[subturn-1] and setup == False:
                 draw.rect(screen,ORANGE,position,5)
@@ -91,11 +114,18 @@ class Mob(sprite.Sprite):
                     move_hovering_over=(position,self.abilities[self.move_positions.index(position)-len(self.moveset)])
         if attack_progressing:
             draw.rect(screen,ORANGE,move_hovering_over[0],5)
-        screen.blit(self.current_sprite, (self.rect.x,self.rect.y))
+        self.rect.x, self.rect.y=int(self.internal_coords[0]), int(self.internal_coords[1])
+        if self.rot[2] != self.rot[0]:
+            screen.blit(self.rot_sprite,(self.rect.x,self.rect.y))
+        else:
+            screen.blit(self.current_sprite, (self.rect.x,self.rect.y))
+        if self.hurt_timer > 0:
+            screen.blit(self.hurt_surface,(self.hurt_anchor[0],self.hurt_anchor[1]+(cut_dim[1]/30)*self.hurt_timer))
+            self.hurt_timer-=1
         for item in self.items:
-            if len(self.items) <= 2:
-                self.items[item].rect.x, self.items[item].rect.y= (self.rect.x+cut_dim[0]*2/3, self.rect.y+item_dim[1]*list(self.items.keys()).index(item))
-            self.items[item].update()
+            for subitem in self.items[item]:
+                subitem.internal_coords[0], subitem.internal_coords[1]= (self.rect.x+cut_dim[0]*2/3, self.rect.y+item_dim[1]*denest(self.items).index(subitem))
+                subitem.update()
 
     def switch_sprite(self,final:Literal["front","back","cut"]):
         if final == "front":
@@ -124,7 +154,43 @@ class Mob(sprite.Sprite):
         self.velocity=(0,0)
         self.miscs=self.original_miscs
         self.switch_sprite("front")
+        self.hurt_timer=0
+        self.hurt_surface=None
         return self
+    
+    def hurt(self, dmg, dmg_type=None):
+        if self.health-dmg < 0:
+            self.health=0
+        else:
+            self.health-=dmg
+        self.hurt_timer=30
+        dmg_colour=(255,0,0)
+        if dmg_type == "psn":
+            dmg_colour=(60,160,25)
+        temp=large_font.render(str(dmg),True,dmg_colour).convert_alpha()
+        self.hurt_surface=Surface((60+temp.get_width()+10,60),SRCALPHA,32).convert_alpha()
+        self.hurt_surface.blit(heart,(0,0))
+        self.hurt_surface.blit(temp,(70,0))
+        self.hurt_anchor=(self.rect.x+cut_dim[0]/2-self.hurt_surface.get_width()/2,self.rect.y)
+
+    def add_item(self,item:Item):
+        if item.condition not in self.items:
+            self.items[item.condition]=[item]
+        else:
+            self.items[item.condition].append(item)
+
+    def remove_item(self,item:Item):
+        for key in self.items:
+            for subitem in self.items[key]:
+                if len(self.items[key]) == 1:
+                    del self.items[key]
+                    break
+                else:
+                    del item
+                    break
+            else:
+                continue
+            break
 
 class Item(sprite.Sprite):
     def __init__(self,name:str,cost:int,effect:Callable,sprite:Path,init_pos:Coord,cut_sprite:Path,border:Literal["blue","pink"],dimensions:Size,condition:Literal["end of turn","start of turn","on death","on hurt","on attack","when played"],uses:int,targets:Literal["can be healed","player1 field","player2 field","whole field","all on field","all healable"]):
@@ -148,6 +214,7 @@ class Item(sprite.Sprite):
         self.rect.x=init_pos[0]
         self.rect.y=init_pos[1]
         self.display_rect=Rect(930,100,card_dim[0]*3,card_dim[1]*3)
+        self.internal_coords=list(init_pos)
         #MOVEMENT
         self.timer=0
         self.movement_phase=0
@@ -160,18 +227,18 @@ class Item(sprite.Sprite):
             self.destinations=dests
             self.times=times
             self.timer=self.times[self.movement_phase]
-            self.velocity=((self.destinations[self.movement_phase][0]-self.rect.x)/self.timer, (self.destinations[self.movement_phase][1]-self.rect.y)/self.timer)
+            self.velocity=((self.destinations[self.movement_phase][0]-self.internal_coords[0])/self.timer, (self.destinations[self.movement_phase][1]-self.internal_coords[1])/self.timer)
 
     def update(self):
         global move_hovering_over
         if self.timer!=0:
-            self.rect.x+=self.velocity[0]
-            self.rect.y+=self.velocity[1]
+            self.internal_coords[0]+=self.velocity[0]
+            self.internal_coords[1]+=self.velocity[1]
             self.timer-=1
         elif self.timer == 0 and self.movement_phase != len(self.destinations)-1 and self.destinations != []:
             self.movement_phase += 1
             self.timer=self.times[self.movement_phase]
-            self.velocity=((self.destinations[self.movement_phase][0]-self.rect.x)/self.timer, (self.destinations[self.movement_phase][1]-self.rect.y)/self.timer)
+            self.velocity=((self.destinations[self.movement_phase][0]-self.internal_coords[0])/self.timer, (self.destinations[self.movement_phase][1]-self.internal_coords[1])/self.timer)
         else:
             self.destinations=[]
             self.times=[]
@@ -180,6 +247,7 @@ class Item(sprite.Sprite):
         if selected == self and self.display_rect.collidepoint(mouse.get_pos()) and not attack_progressing:
             draw.rect(screen,ORANGE,Rect(self.display_rect.left-5,self.display_rect.top-5,self.display_rect.width,self.display_rect.height),5)
             move_hovering_over=(self.display_rect,self.effect)
+        self.rect.x, self.rect.y=int(self.internal_coords[0]),int(self.internal_coords[1])
         screen.blit(self.current_sprite, (self.rect.x,self.rect.y))
 
     def switch_sprite(self, final:Literal["front","back","cut"]):
@@ -238,7 +306,8 @@ class Player():
         for i in range(len(self.hand)):
             if self.player_number==2:
                 self.hand[i].switch_sprite("back")
-            self.hand[i].rect.y, self.hand[i].rect.x= (self.hand_pos[1],self.hand_pos[0]+card_dim[0]*i)
+            if self.hand[i].destinations == []:
+                self.hand[i].internal_coords[1], self.hand[i].internal_coords[0]= (self.hand_pos[1],self.hand_pos[0]+card_dim[0]*i)
             self.hand[i].update()
             #display cards
         for card in self.field:
@@ -260,7 +329,8 @@ class Player():
                     if "on death" in card.passives:
                         result=card.passives["on death"](origin=card,player=self)
                     if "on death" in card.items:
-                        result=card.items["on death"](origin=card,player=self)
+                        for subitem in card.items["on death"]:
+                            result=subitem.effect(origin=card,player=self,item=subitem)
                     if result == None:
                         if card.proxy_for != None:
                             card.proxy_for.proxy=None
@@ -296,12 +366,14 @@ class Player():
         if type(target) == Mob:
             self.field[pos-1]=target
             target.switch_sprite("cut")
-            target.rect.x, target.rect.y=self.field_pos[pos-1]
+            #target.rect.x, target.rect.y=self.field_pos[pos-1]
+            target.internal_coords[0], target.internal_coords[1]= self.field_pos[pos-1][0], self.field_pos[pos-1][1]+copysign(cut_dim[1],1.5-self.player_number)
+            target.startmove([self.field_pos[pos-1]],[15])
             if not ignore_cost:
                 self.souls -= target.cost
         elif type(target) == Item:
             if target.condition != "when played":
-                self.field[pos-1].items[target.condition]=target
+                self.field[pos-1].add_item(target)
                 target.switch_sprite("cut")
                 if not ignore_cost:
                     self.souls -= target.cost
@@ -356,8 +428,34 @@ class Ability():
             tempt=[mob for mob in player1.field if (mob != None and mob.proxy == None and mob.proxy_for == None and mob != selected)]
         return tempt
 
+def excepthook(type, value, traceback):
+    print(f"Error: {type.__name__}\nReason: {value}\nTraceback :\n{str(t.format_tb(traceback))}")
+    name="crash_log_"+str(tm.time())+".txt"
+    temp_tb=t.format_tb(traceback)
+    crashlog=open(name,"wt")
+    crashlog.write("If you are seeing this, please contact the creator with this file here:\n24149007@imail.sunway.edu.my\n\n")
+    crashlog.write(f"Game ID: {game_id}\nTime: {tm.asctime()}\nError: {type.__name__}\nReason: {value}\nTraceback :")
+    for i in range(len(temp_tb)):
+        crashlog.write(f"{temp_tb[i]}\n")
+    crashlog.close()
+    os.startfile(name)
+
 def nofunction_item(**kwargs):
     pass
+
+def start_of_turn():
+    for card in player1.field:
+        if card != None and "start of turn" in card.passives:
+            card.passives["start of turn"]()
+        if card != None and "start of turn" in card.items:
+            for subitem in card.items["start of turn"]:
+                subitem.effect(item=subitem,origin=card,player=player1)
+    for card in player2.field:
+        if card != None and "start of turn" in card.passives:
+            card.passives["start of turn"]()
+        if card != None and "start of turn" in card.items:
+            for subitem in card.items["start of turn"]:
+                subitem.effect(item=subitem,origin=card,player=player2)
 
 def deckbuilder(list_to_use:dict[Card,int]) -> list[Card]:
     here_deck=[]
@@ -365,13 +463,45 @@ def deckbuilder(list_to_use:dict[Card,int]) -> list[Card]:
         for i in range(list_to_use[card]):
             actual_card=eval(card)
             here_deck.append(actual_card)
-    r.shuffle(here_deck)
+    shuffle(here_deck)
     return here_deck
+
+def draw_card(player:Player,amount:int=1) -> list[Card]|Card:
+    global deck
+    mob_deck=[mob for mob in deck if type(mob)==Mob]
+    card_list=[]
+    for i in range(amount):
+        if player.player_number==1:
+            card=deck.pop()
+        else:
+            card=mob_deck.pop()
+            deck=[thing for thing in deck if thing != card]
+        player.hand.append(card)
+        card_list.append(card)
+        card.internal_coords=[100,262]
+        card.startmove([(player.hand_pos[0]+card_dim[0]*len(player.hand),player.hand_pos[1])],[30])
+    if len(card_list) == 1:
+        return card_list[0]
+    else:
+        return card_list
+
+def denest(dictionary:dict) -> list:
+    result=[]
+    for key in dictionary:
+        if type(dictionary[key]) != list:
+            result.append(dictionary[key])
+        else:
+            for item in dictionary[key]:
+                result.append(item)
+    return result
+
+def len_items(items:dict) -> int:
+    return len(denest(items))
 
 def atk_check(func) -> bool: #decorator that applies to all attacks, first decorator layer
     def atk_wrapper(**kwargs):
         global markers
-        if kwargs["noattack"] == False and "Egg Rain" not in [item.name for item in list(kwargs["origin"].items.values())]: #egg rain
+        if kwargs["noattack"] == False and "Egg Rain" not in [item.name for item in denest(kwargs["origin"].items)]: #egg rain
             result:list[bool,int,list[Card]]=list(func(**kwargs))
             if markers["forage"] > 1: #forage
                 markers["forage"] -= 1
@@ -382,34 +512,19 @@ def atk_check(func) -> bool: #decorator that applies to all attacks, first decor
                 result.append([kwargs["target"]])
             for card in result[2]:
                 if "on attack" in kwargs["origin"].items:
-                    result=kwargs["origin"].items["on attack"].effect(origin=kwargs["origin"],target=card,player=player1,original=result)
+                    for subitem in kwargs["origin"].items["on attack"]:
+                        result=subitem.effect(origin=kwargs["origin"],target=card,player=kwargs["player"],original=result,item=subitem)
                 if card.proxy != None:
                     card=card.proxy
-                card.health-=result[1]
+                card.hurt(result[1])
                 if kwargs["origin"] in player2.field: #quick strike
                     for mob in [mob for mob in player1.field if (mob != None and mob.name == "Horse")]:
-                        if kwargs["origin"].proxy == None:
-                            kwargs["origin"].health-=1
-                        else:
-                            kwargs["origin"].proxy.health-=1
-                        if "on hurt" in kwargs["origin"].passives:
-                            kwargs["origin"].passives["on hurt"](origin=mob,target=card,damage=1)
-                        if "on hurt" in kwargs["origin"].items:
-                            kwargs["origin"].items["on hurt"].effect(origin=mob,target=card,player=kwargs["player"],damage=1)
-                            kwargs["origin"].items["on hurt"].uses-=1
-                            if kwargs["origin"].items["on hurt"].uses == 0:
-                                del kwargs["origin"].items["on hurt"]
+                        mob.passives["special: quick strike"](origin=kwargs["origin"],target=kwargs["target"],player=kwargs["player"],striker=mob)
                 if "on hurt" in card.passives and result[1] != 0:
                     card.passives["on hurt"](origin=kwargs["origin"],target=card,player=kwargs["player"],damage=result[1])
                 if "on hurt" in card.items and result[1] != 0:
-                    card.items["on hurt"].effect(origin=kwargs["origin"],target=card,player=kwargs["player"],damage=result[1])
-                    card.items["on hurt"].uses-=1
-                    if card.items["on hurt"].uses == 0:
-                        del card.items["on hurt"]
-            if "on attack" in kwargs["origin"].items:
-                kwargs["origin"].items["on attack"].uses -= 1
-                if kwargs["origin"].items["on attack"].uses == 0:
-                    del kwargs["origin"].items["on attack"]
+                    for subitem in card.items["on hurt"]:
+                        subitem.effect(origin=kwargs["origin"],target=card,player=kwargs["player"],damage=result[1],card=subitem)
             return result[0]
         else:
             return func(origin=kwargs["origin"],target=kwargs["target"],player=kwargs["player"],noattack=True)[0]
@@ -458,6 +573,9 @@ def itm_check(func): #decorator that applies to all items, first decorator layer
                     result=func(**kwargs)
                 else:
                     result=func(origin=kwargs["origin"],target=card,player=kwargs["player"],original=kwargs["original"])
+                kwargs["item"].uses-=1
+                if kwargs["item"].uses == 0:
+                    kwargs["origin"].remove_item(kwargs["item"])
         return result
     return itm_wrapper
 
@@ -617,7 +735,7 @@ def prime(**kwargs): #ability
         kwargs["origin"].cut_sprite=transform.rotate(kwargs["origin"].cut_sprite,-90.0)
         tempc=(kwargs["origin"].rect.x,kwargs["origin"].rect.y)
         kwargs["origin"].switch_sprite("cut")
-        kwargs["origin"].rect.x, kwargs["origin"].rect.y=tempc
+        kwargs["origin"].internal_coords[0], kwargs["origin"].internal_coords[1]=tempc
     elif kwargs["origin"].miscs["prime_status"] == 1:
         for card in opp.field:
             if card != None:
@@ -639,6 +757,19 @@ def purple(**kwargs:Attack_params) -> tuple[Literal[False],int,list[Card]]: #att
     if kwargs["noattack"] == False:
         dmg=3
     return False, dmg, [card for card in player1.field+player2.field if card != None]
+
+@psv_check
+def quick_strike(**kwargs): #passive: special: quick strike
+    if kwargs["origin"].proxy == None:
+        intended_target=kwargs["origin"]
+    else:
+        intended_target=kwargs["origin"].proxy
+    intended_target.health -= 1
+    if "on hurt" in intended_target.passives:
+        intended_target.passives["on hurt"](origin=kwargs["striker"],target=card,damage=1)
+    if "on hurt" in intended_target.items:
+        for subitem in intended_target.items["on hurt"]:
+            subitem.effect(origin=kwargs["striker"],target=card,player=kwargs["player"],damage=1,item=subitem)
 
 @atk_check
 def rush(**kwargs:Attack_params) -> tuple[Literal[True],int]: #attack
@@ -680,7 +811,7 @@ def split(**kwargs) -> None|Literal["cancel"]: #passive: on death
         kwargs["origin"].cut_sprite=transform.rotate(kwargs["origin"].cut_sprite,-90.0)
         tempc=(kwargs["origin"].rect.x,kwargs["origin"].rect.y)
         kwargs["origin"].switch_sprite("cut")
-        kwargs["origin"].rect.x, kwargs["origin"].rect.y=tempc
+        kwargs["origin"].internal_coords[0], kwargs["origin"].internal_coords[1]=tempc
         kwargs["origin"].miscs["rotation"]=1
         return "cancel"
     else:
@@ -727,9 +858,9 @@ def tongue_whip(**kwargs) -> tuple[Literal[True],int]: #attack
         dmg=1
         if kwargs["target"].items == {}:
             pass
-        elif len(kwargs["target"].items) == 1:
-            kwargs["origin"].items[list(kwargs["target"].items.keys())[0]]=list(kwargs["target"].items.values())[0]
-            del kwargs["target"].items[list(kwargs["target"].items.keys())[0]]
+        elif len_items(kwargs["target"].items) == 1:
+            kwargs["origin"].add_item(list(kwargs["target"].items.values())[0][0])
+            kwargs["target"].remove_item(list(kwargs["target"].items.values())[0][0])
         else:
             until_end += 3
             targets = kwargs["target"].items
@@ -790,31 +921,13 @@ def wool_guard(**kwargs) -> Literal["break"]|None: #ability
     if kwargs["origin"] != kwargs["target"]:
         kwargs["origin"].proxy_for=kwargs["target"]
         kwargs["target"].proxy=kwargs["origin"]
-        kwargs["origin"].rect.x=kwargs["target"].rect.x
-        kwargs["origin"].rect.y=kwargs["target"].rect.y+copysign(40,1.5-kwargs["player"].player_number)
+        kwargs["origin"].internal_coords[0]=kwargs["target"].rect.x
+        kwargs["origin"].internal_coords[1]=kwargs["target"].rect.y+copysign(40,1.5-kwargs["player"].player_number)
         if kwargs["origin"].proxy != None:
             kwargs["origin"].proxy.proxy_for=None
-            kwargs["origin"].proxy.rect.x, kwargs["origin"].proxy.rect.y= player1.field_pos[player1.field.index(kwargs["origin"].proxy)]
+            kwargs["origin"].proxy.internal_coords[0], kwargs["origin"].proxy.internal_coords[1]= player1.field_pos[player1.field.index(kwargs["origin"].proxy)]
             kwargs["origin"].proxy=None
         return "break"
-
-def start_of_turn():
-    for card in player1.field:
-        if card != None and "start of turn" in card.passives:
-            card.passives["start of turn"]()
-        if card != None and "start of turn" in card.items:
-            card.items["start of turn"].effect()
-            card.items["start of turn"].uses -= 1
-            if card.items["start of turn"].uses == 0:
-                del card.items["start of turn"]
-    for card in player2.field:
-        if card != None and "start of turn" in card.passives:
-            card.passives["start of turn"]()
-        if card != None and "start of turn" in card.items:
-            card.items["start of turn"].effect()
-            card.items["start of turn"].uses -= 1
-            if card.items["start of turn"].uses == 0:
-                del card.items["start of turn"]
 
 #constants
 title_img=transform.scale(image.load("title.png"),(842,120)).convert_alpha()
@@ -824,6 +937,7 @@ cut_dim=(169,172)
 item_dim=(75,75)
 token_dim=(30,30)
 soul=transform.scale(image.load("soul.png"),token_dim).convert()
+heart=transform.scale(image.load("hearts_1.png"),(60,60)).convert()
 ORANGE = (255,180,0)
 SOUL_COLOUR=(255,255,255)
 starting_cards=5
@@ -843,6 +957,8 @@ PORT=6543
 effect_sprites={"psn":image.load("psn.png").convert_alpha(),"aquatised":transform.scale(image.load("aquatised.png"),(23,23)).convert()}
 monkey_sprite=transform.scale(image.load("monkey.png"),(840*(window_dim[1]/859),window_dim[1])).convert_alpha()
 subturn_sprites=[transform.scale(image.load("abs_subturn_none.png"),(150,360)).convert(),transform.scale(image.load("abs_subturn_1.webp"),(150,360)).convert(),transform.scale(image.load("abs_subturn_2.webp"),(150,360)).convert(),transform.scale(image.load("abs_subturn_3.png"),(150,360)).convert()]
+#sys.excepthook=excepthook
+game_id=str(int(tm.time()))
 
 #variables
 running=True
@@ -853,7 +969,7 @@ turn=0
 setup=True
 subturn=1 #subturn numbers start from 1, keeps track of which card should be attacking
 abs_subturn=1 #keeps track of how many subturns have passed
-abs_abs_subturn=1
+abs_abs_subturn=1 #turns got a bit out of hand
 postsubturn=1 #postsubturn numbers start from 2
 attack_choosing_state=False
 HOST=''
@@ -887,7 +1003,7 @@ egg_rain=r'Item("Egg Rain",1,nofunction_item,r"Sprites\Egg Rain.png",(0,0),r"Cut
 frog=r'Mob("Frog",2,3,[],[tongue_whip],{},{},"aquatic","swamp","blue",r"Sprites\Frog.png",(0,0),r"Cut Sprites\Frog.png",[(987,512,1323,579)])'
 goat_horn=r'Item("Goat Horn",3,goat_horn_bounce,r"Sprites\Goat Horn.png",(0,0),r"Cut Sprites\Goat Horn.png","pink",card_dim,"when played",1,"special: goat horn")'
 guardian=r'Mob("Guardian",4,3,[],[eye_laser],{"on hurt":thorn_body},{},"aquatic","ocean","blue",r"Sprites\Guardian.png",(0,0),r"Cut Sprites\Guardian.png",[(987,502,1323,569)])'
-horse=r'Mob("Horse",4,5,[],[bite],{},{},"misc","plains","pink",r"Sprites\Horse.png",(0,0),r"Cut Sprites\Horse.png",[(987,512,1323,579)])'
+horse=r'Mob("Horse",4,5,[],[bite],{"special: quick strike":quick_strike},{},"misc","plains","pink",r"Sprites\Horse.png",(0,0),r"Cut Sprites\Horse.png",[(987,512,1323,579)])'
 loot_chest=r'Item("Loot Chest",0,loot_chest_draw,r"Sprites\Loot Chest.png",(0,0),r"Cut Sprites\Loot Chest.png","blue",card_dim,"when played",1,"whole field")'
 milk=r'Item("Milk",2,milk_cleanse,r"Sprites\Milk.png",(0,0),r"Cut Sprites\Milk.png","blue",card_dim,"when played",1,"player1 field")'
 muddy_pig=r'Mob("Muddy Pig",2,3,[],[rush],{"on this turn":forage},{},"misc","plains","blue",r"Sprites\Muddy Pig.png",(0,0),r"Cut Sprites\Muddy Pig.png",[(987,512,1323,579)])'
@@ -906,7 +1022,7 @@ witch=r'Mob("Witch",3,4,[Ability(1,witch_poison,"player2 field"),Ability(1,witch
 zombie=r'Mob("Zombie",2,4,[],[bite],{"on hurt":undead},{},"undead","cavern","blue",r"Sprites\Zombie.png",(0,0),r"Cut Sprites\Zombie.png",[(987,512,1323,579)])'
 #Mob()
 
-decklist={frog:30}
+decklist={zombie:30,sword:10}
 #playername=input("Enter your name: ")
 playername="J1"
 player1=Player(playername,1,(fields_anchor[0],y_rails[1]+cut_dim[1]+card_spacing_y),[(x_rails[0],y_rails[1]),(x_rails[1],y_rails[1]),(x_rails[2],y_rails[1])])
@@ -969,8 +1085,9 @@ while running:
                         if card.rect.collidepoint(pos):
                             selected=card
                         for item in card.items:
-                            if card.items[item].rect.collidepoint(pos):
-                                selected=card.items[item]
+                            for subitem in card.items[item]:
+                                if subitem.rect.collidepoint(pos):
+                                    selected=subitem
                 for card in player1.hand:
                     if card.rect.collidepoint(pos):
                         selected=card
@@ -979,8 +1096,9 @@ while running:
                         if card.rect.collidepoint(pos):
                             selected=card
                         for item in card.items:
-                            if card.items[item].rect.collidepoint(pos):
-                                selected=card.items[item]
+                            for subitem in card.items[item]:
+                                if subitem.rect.collidepoint(pos):
+                                    selected=subitem
                 for card in player2.hand:
                     if card.rect.collidepoint(pos) and card.current_sprite != card.back_sprite:
                         selected=card
@@ -1026,7 +1144,7 @@ while running:
                                 else:
                                     counter=False
                                     other_counter=not counter
-                                #selected.startmove([(target.rect.x,target.rect.y),(selected.rect.x,selected.rect.y)],[10,10])
+                                selected.startmove([(target.rect.x,target.rect.y),(selected.rect.x,selected.rect.y)],[10,10])
                                 if (counter == True or counter == other_counter) and len(target.moveset) > 0:
                                     card.moveset[0](origin=target,target=selected,player=player2,noattack=False)
                             else:
@@ -1036,13 +1154,13 @@ while running:
                                     if "end this turn" in selected.passives:
                                         selected.passives['end this turn'](origin=selected,player=player1)
                                     if selected.status["psn"] > 0:
-                                        selected.health -= 1
+                                        selected.hurt(1,"psn")
                                         selected.status["psn"] -= 1
                                 if player2.field[subturn-1] != None:
                                     if "end this turn" in player2.field[subturn-1].passives:
                                         player2.field[subturn-1].passives["end this turn"](origin=player2.field[subturn-1],player=player2)
                                     if player2.field[subturn-1].status["psn"] > 0:
-                                        player2.field[subturn-1].health -= 1
+                                        player2.field[subturn-1].hurt(1,"psn")
                                         player2.field[subturn-1].status["psn"] -= 1
                                 if postsubturn == 1 and setup == False:
                                     abs_subturn += 1
@@ -1079,13 +1197,13 @@ while running:
                                         if "end this turn" in player1.field[subturn-1].passives:
                                             player1.field[subturn-1].passives["end this turn"](origin=player1.field[subturn-1],player=player1)
                                         if player1.field[subturn-1].status["psn"] > 0:
-                                            player1.field[subturn-1].health -= 1
+                                            player1.field[subturn-1].hurt(1,"psn")
                                             player1.field[subturn-1].status["psn"] -= 1
                                     if player2.field[subturn-1] != None:
                                         if "end this turn" in player2.field[subturn-1].passives:
                                             player2.field[subturn-1].passives["end this turn"](origin=player2.field[subturn-1],player=player2)
                                         if player2.field[subturn-1].status["psn"] > 0:
-                                            player2.field[subturn-1].health -= 1
+                                            player2.field[subturn-1].hurt(1,"psn")
                                             player2.field[subturn-1].status["psn"] -= 1
                                     if postsubturn == 1 and setup == False:
                                         abs_subturn += 1
@@ -1156,6 +1274,7 @@ while running:
                 selected_move=None
                 attack_progressing=False
                 move_hovering_over=None
+                game_id=str(int(tm.time()))
                 player2=''
                 player1.reset()
         
@@ -1167,6 +1286,8 @@ while running:
                     HOST = HOST[:-1]
                 else:
                     HOST += e.unicode
+            if e.key == K_e and connect_state != "connecting":
+                raise RuntimeError("User called exception.")
 
     if state == "menu":
         screen.blit(title_img,(window_dim[0]/2-421,165))
@@ -1201,7 +1322,7 @@ while running:
     elif state == "pregame":
         screen.blit(pregame_text,(window_dim[0]/2-mjgs.size("Loading...")[0]/2,window_dim[1]/2))
         if sock in read_ready:
-            t.sleep(1)
+            tm.sleep(1)
             player2name=sock.recv(4096).decode()
             print(f"Opp. name: {player2name}")
             player2=Player(player2name,2,(fields_anchor[0],fields_anchor[1]/2),[(x_rails[0],y_rails[0]),(x_rails[1],y_rails[0]),(x_rails[2],y_rails[0])])
@@ -1213,6 +1334,7 @@ while running:
         if markers["deck built"] == False:
             turn = 1
             deck = deckbuilder(decklist)
+            #'''
             mob_deck=[card for card in deck if type(card)==Mob]
             for i in range(3):
                 player2.hand.append(mob_deck.pop())
@@ -1221,6 +1343,13 @@ while running:
             for i in range(starting_cards):
                 player1.hand.append(deck.pop())
                 player2.hand.append(deck.pop())
+            #'''
+            '''
+            draw_card(player2,8)
+            for i in range(3):
+                player2.add_to_field(i,i+1,True)
+            draw_card(player1,5)
+            '''
             markers["deck built"]=True
         if not markers["start of turn called"] and turn != 1:
             player1.souls += turn
@@ -1257,7 +1386,8 @@ while running:
                     player1.field[postsubturn-2].passives["end of turn"](origin=player1.field[postsubturn-2],player=player1)
                     skippost=False
                 if "end of turn" in player1.field[postsubturn-2].items:
-                    player1.field[postsubturn-2].items["end of turn"].effect(origin=player1.field[postsubturn-2],player=player1)
+                    for subitem in player1.field[postsubturn-2].items["end of turn"]:
+                        subitem.effect(origin=player1.field[postsubturn-2],player=player1,item=subitem)
                     skippost=False
             if skippost:
                 postsubturn += 1
@@ -1267,7 +1397,7 @@ while running:
                 hand_cost.append(card.cost)
             else:
                 hand_cost.append(99)
-        if min(hand_cost) >= player1.souls and setup == True:
+        if setup == True and min(hand_cost) >= player1.souls:
             abs_subturn += 1
             abs_abs_subturn += 1
         if postsubturn >= 5 and setup == False:
@@ -1363,9 +1493,10 @@ while running:
                 markers["fade"][0]-=1
                 markers["fade"][3]+=markers["fade"][4]
 
+    fps_text=mjgs.render(f"FPS:{str(round(clock.get_fps(),2))}",True,(255,255,255))
+    screen.blit(fps_text,(0,fps_text.get_height()))
     display.update()
     clock.tick(FPS)
-    #print(clock.get_fps())
 
     '''
     To-do:
@@ -1378,10 +1509,11 @@ while running:
     3. Figure out animations: card going from hand to field, card attacking, start of turn animations
     4. Implement putting multiple items of the same type onto mobs
     5. Does item application count as a subturn?
-    6. Make quick strike a call to an attack instead of a messy code block inside atk_check
-    7. Move item use depletion into itm_check instead of being called wherever an item is
     8. Get item stealing to work
-    9. Line 1238: don't constantly load images, only do it when selected changes
+    9. Don't constantly load images, only do it when selected changes
+
+    Bugs:
+    1. If cards are drawn for player2 using draw_card and added to the field, they go way off the screen somewhere, but they work normally with the old method. Since draw_card also calls start_move, I think its some interaction between start+move called when the card is already moving. I thought I already put safeguards against that, but anyways, I'll need to do further testing.
 
     Conditions:
     "end of turn": Called at the end of the attack phase
