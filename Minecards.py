@@ -1,15 +1,16 @@
-from __future__ import annotations
-from pygame import *
 from collections.abc import Callable
+from __future__ import annotations
 from typing import Literal
 from random import shuffle
-import time as tm
+from math import copysign
+from pygame import *
 import traceback as t
+import time as tm
 import socket
 import select
+import json
 import sys
 import os
-from math import copysign
 
 type Card = Mob|Item
 type Coord = tuple[int|float,int|float]
@@ -237,15 +238,16 @@ class Item(sprite.Sprite):
         self.velocity=(0,0)
 
     def startmove(self,dests:list[Coord],times:list[int]): #destination as a coord tuple, time in frames
-        if self.timer==0:
+        if self.timer != 0 or (len(self.destinations) > 0 and self.times[-1] == 0):
+            self.destinations+=dests
+            self.times+=times
+        else:
             self.destinations=dests
             self.times=times
+            self.movement_phase=0
             self.timer=self.times[self.movement_phase]
             if self.timer != 0:
                 self.velocity=((self.destinations[self.movement_phase][0]-self.internal_coords[0])/self.timer, (self.destinations[self.movement_phase][1]-self.internal_coords[1])/self.timer)
-        else:
-            self.destinations+=dests
-            self.times+=times
 
     def update(self):
         global move_hovering_over
@@ -253,15 +255,19 @@ class Item(sprite.Sprite):
             self.internal_coords[0]+=self.velocity[0]
             self.internal_coords[1]+=self.velocity[1]
             self.timer-=1
-        elif self.timer == 0 and self.movement_phase != len(self.destinations)-1 and self.destinations != []:
-            temp=True
+        elif self.timer == 0 and self.movement_phase != len(self.destinations)-1 and self.destinations != [] and self.times[self.movement_phase+1] == 0:
             self.movement_phase+=1
-            if self.timer == 0 and self.times[self.movement_phase] == 0:
-                self.internal_coords[0], self.internal_coords[1]=self.destinations[self.movement_phase]
-                temp=False
-            if temp:
-                self.timer=self.times[self.movement_phase]
-                self.velocity=((self.destinations[self.movement_phase][0]-self.internal_coords[0])/self.timer, (self.destinations[self.movement_phase][1]-self.internal_coords[1])/self.timer)
+            self.internal_coords[0], self.internal_coords[1]=self.destinations[self.movement_phase]
+            self.timer=self.times[self.movement_phase]
+        elif self.timer == 0 and self.movement_phase != len(self.destinations)-1 and self.destinations != [] and self.times[0] == 0 and self.movement_phase == 0:
+            self.internal_coords[0], self.internal_coords[1]=self.destinations[self.movement_phase]
+            self.movement_phase+=1
+            self.timer=self.times[self.movement_phase]
+            self.velocity=((self.destinations[self.movement_phase][0]-self.internal_coords[0])/self.timer, (self.destinations[self.movement_phase][1]-self.internal_coords[1])/self.timer)
+        elif self.timer == 0 and self.movement_phase != len(self.destinations)-1 and self.destinations != []:
+            self.movement_phase+=1
+            self.timer=self.times[self.movement_phase]
+            self.velocity=((self.destinations[self.movement_phase][0]-self.internal_coords[0])/self.timer, (self.destinations[self.movement_phase][1]-self.internal_coords[1])/self.timer)
         else:
             self.destinations=[]
             self.times=[]
@@ -956,20 +962,20 @@ def wool_guard(**kwargs) -> Literal["break"]|None: #ability
         return "break"
 
 #constants
-title_img=transform.scale(image.load("title.png"),(842,120)).convert_alpha()
+title_img=transform.scale(image.load(r"Assets\title.png"),(842,120)).convert_alpha()
 card_dim=(150,225)
 card_dim_rot=(225,150)
 cut_dim=(169,172)
 item_dim=(75,75)
 token_dim=(30,30)
-soul=transform.scale(image.load("soul.png"),token_dim).convert()
-heart=transform.scale(image.load("hearts_1.png"),(60,60)).convert()
+soul=transform.scale(image.load(r"Assets\soul.png"),token_dim).convert()
+heart=transform.scale(image.load(r"Assets\hearts_1.png"),(60,60)).convert()
 ORANGE = (255,180,0)
 SOUL_COLOUR=(255,255,255)
 starting_cards=5
 drawing_cards=2
-cardback="card_back.png"
-background=transform.scale(image.load("background.png"),window_dim).convert()
+cardback=r"Assets\mob_back.png"
+background=transform.scale(image.load(r"Assets\background.png"),window_dim).convert()
 FPS=60
 clock=time.Clock()
 fields_anchor=(90,40)
@@ -980,9 +986,9 @@ x_rails=[fields_anchor[0],fields_anchor[0]+cut_dim[0]+card_spacing_x,fields_anch
 hearts_rails=[y_rails[0]+cut_dim[0]+10,y_rails[1]-10-20] #0: player 2, 1: player 1
 game_overs=("win", "tie", "lose")
 PORT=6543
-effect_sprites={"psn":image.load("psn.png").convert_alpha(),"aquatised":transform.scale(image.load("aquatised.png"),(23,23)).convert()}
-monkey_sprite=transform.scale(image.load("monkey.png"),(840*(window_dim[1]/859),window_dim[1])).convert_alpha()
-subturn_sprites=[transform.scale(image.load("abs_subturn_none.png"),(150,360)).convert_alpha(),transform.scale(image.load("abs_subturn_1.webp"),(150,360)).convert_alpha(),transform.scale(image.load("abs_subturn_2.webp"),(150,360)).convert_alpha(),transform.scale(image.load("abs_subturn_3.png"),(150,360)).convert_alpha()]
+effect_sprites={"psn":image.load(r"Assets\psn.png").convert_alpha(),"aquatised":transform.scale(image.load(r"Assets\aquatised.png"),(23,23)).convert()}
+monkey_sprite=transform.scale(image.load(r"Assets\monkey.png"),(840*(window_dim[1]/859),window_dim[1])).convert_alpha()
+subturn_sprites=[transform.scale(image.load(r"Assets\abs_subturn_none.png"),(150,360)).convert_alpha(),transform.scale(image.load(r"Assets\abs_subturn_1.webp"),(150,360)).convert_alpha(),transform.scale(image.load(r"Assets\abs_subturn_2.webp"),(150,360)).convert_alpha(),transform.scale(image.load(r"Assets\abs_subturn_3.png"),(150,360)).convert_alpha()]
 #sys.excepthook=excepthook
 game_id=str(int(tm.time()))
 
@@ -1012,7 +1018,7 @@ ability_selected=False
 #define cards here
 #Note: cards for deck use are defined by deckbuilder(), which takes these strings and eval()s them into objects
 #This is so each deck entry has a separate memory value
-deck_plc=Item("Deck Placeholder",0,None,"card_back_rot.png",(100,262),"card_back_rot.png",None,card_dim_rot,'',None,None)
+deck_plc=Item("Deck Placeholder",0,None,r"Assets\card_back_rot.png",(100,262),r"Assets\card_back_rot.png",None,card_dim_rot,'',None,None)
 whole_field=Item("THE ENTIRE FIELD!!!",0,nofunction_item,r"Sprites\Whole Field.png",(fields_anchor[0],fields_anchor[1]),r"Sprites\Whole Field.png","pink",(3*cut_dim[0]+3*card_spacing_x,2*cut_dim[1]+card_dim_rot[1]+2*card_spacing_y),None,None,None)
 preset_dummy=Mob("Dummy",0,999,[],[bite],{},{},"misc","plains","pink",r"Sprites\Dummy.png",(0,0),r"Cut Sprites\Dummy.png",[(987,512,1323,579)])
 axolotl=r'Mob("Axolotl",3,3,[],[bite],{"on death":play_dead},{},"aquatic","ocean","blue",r"Sprites\Axolotl.png",(0,0),r"Cut SPrites\Axolotl.png",[(987,512,1323,579)])'
@@ -1073,6 +1079,11 @@ lose_text=large_font.render("You lost...",True,(255,0,0))
 skill_issue_text=small_font.render("skill issue",True,(255,255,255))
 tie_text=large_font.render("You tied!",True,(255,255,0))
 to_menu_text=ClickableText(mjgs,"Back to menu",(255,255,255),(window_dim[0]/2-mjgs.size("Back to menu")[0]/2,3*window_dim[1]/4))
+decks_text=ClickableText(mjgs,"Decks",(0,0,0),(window_dim[0]/2-mjgs.size("Decks")[0]/2,750))
+decks_to_menu_text=ClickableText(mjgs,"Back to menu",(0,0,0),(window_dim[0]/2-mjgs.size("Back to menu")[0]/2,750))
+decks_title_text=large_font.render("My Decks",True,(0,0,0))
+create_deck_text=ClickableText(mjgs,"+ Create new deck",(20,100,140),(window_dim[0]-mjgs.size("+ Create new deck")[0]-100,750))
+delete_deck_text=ClickableText(mjgs,"Delete deck",(200,0,0),(100,750))
 
 while running:
     screen.blit(background,(0,0))
@@ -1087,7 +1098,7 @@ while running:
             running=False
         elif e.type == MOUSEBUTTONUP and state not in game_overs and not markers["freeze"]:
             pos=mouse.get_pos()
-            if state != "game":
+            if state == "menu":
                 if host_text.textrect.collidepoint(pos):
                     if markers["do not connect"]:
                         state="game"
@@ -1103,6 +1114,12 @@ while running:
                         print("Connection successful")
                     except:
                         markers["retry"]=True
+                elif decks_text.textrect.collidepoint(pos):
+                    state="deck screen"
+
+            elif state == "deck screen":
+                if decks_to_menu_text.textrect.collidepoint(pos):
+                    state="menu"
 
             if state == "game" and not attack_progressing:
                 for card in player1.field:
@@ -1320,6 +1337,7 @@ while running:
         if connect_state == "idle":
             screen.blit(host_text.text, host_text.position)
             screen.blit(connect_text.text, connect_text.position)
+            screen.blit(decks_text.text, decks_text.position)
         elif connect_state == "hosting":
             screen.blit(connecting_text,(window_dim[0]/2-mjgs.size("Waiting for connection")[0]/2,600))
             display.update()
@@ -1343,6 +1361,12 @@ while running:
             screen.blit(ip_submit_text.text, ip_submit_text.position)
             if markers["retry"] == True:
                 screen.blit(retry_text,(window_dim[0]/2-mjgs.size("Retry Connection")[0]/2,400))
+
+    elif state == "deck screen":
+        screen.blit(decks_to_menu_text.text, decks_to_menu_text.position)
+        screen.blit(decks_title_text,(window_dim[0]/2-large_font.size("My Decks")[0]/2,25))
+        screen.blit(create_deck_text.text,create_deck_text.position)
+        screen.blit(delete_deck_text.text,delete_deck_text.position)
 
     elif state == "pregame":
         screen.blit(pregame_text,(window_dim[0]/2-mjgs.size("Loading...")[0]/2,window_dim[1]/2))
@@ -1474,11 +1498,12 @@ while running:
                 markers["game over called"]=True
         screen.blit(mjgs.render(f"Abs:{str(abs_subturn)}, Sub:{str(subturn)}",True,(255,255,255)),(0,0))
 
-    colourval = markers["fade"][1]+[markers["fade"][3]]
-    temps=Surface(window_dim)
-    temps.set_alpha(markers["fade"][3])
-    temps.fill(markers["fade"][1])
-    screen.blit(temps,(0,0))
+    if state in game_overs:
+        colourval = markers["fade"][1]+[markers["fade"][3]]
+        temps=Surface(window_dim).convert_alpha()
+        temps.set_alpha(markers["fade"][3])
+        temps.fill(markers["fade"][1])
+        screen.blit(temps,(0,0))
     if setup == False:
         if state == "lose":
             if markers["fade"][0] <= 0:
@@ -1527,8 +1552,7 @@ while running:
     11. Cards do a little jump when their passives activate
 
     Bugs:
-    1. Cards placed into the field don't move to their lower positions (the "teleporting" part)
-    2. FPS drop when game end screen comes into full opacity
+    1. FPS drop when game end screen comes into full opacity
 
     Conditions:
     "end of turn": Called at the end of the attack phase
