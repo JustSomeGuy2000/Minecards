@@ -70,12 +70,16 @@ class Mob(sprite.Sprite):
         self.rot_sprite=None
 
     def startmove(self,dests:list[Coord],times:list[int]):
-        if self.timer==0:
+        if self.timer != 0 or (len(self.destinations) > 0 and self.times[-1] == 0):
+            self.destinations+=dests
+            self.times+=times
+        else:
             self.destinations=dests
             self.times=times
+            self.movement_phase=0
             self.timer=self.times[self.movement_phase]
-            self.velocity=((self.destinations[self.movement_phase][0]-self.internal_coords[0])/self.timer, (self.destinations[self.movement_phase][1]-self.internal_coords[1])/self.timer)
-            print(f"{self.velocity[0]*self.times[0]},{self.velocity[1]*self.times[0]}")
+            if self.timer != 0:
+                self.velocity=((self.destinations[self.movement_phase][0]-self.internal_coords[0])/self.timer, (self.destinations[self.movement_phase][1]-self.internal_coords[1])/self.timer)
 
     def startrot(self,angle:int,rot_time:int):
         if self.rot[2] == 0:
@@ -91,8 +95,17 @@ class Mob(sprite.Sprite):
             self.internal_coords[0]+=self.velocity[0]
             self.internal_coords[1]+=self.velocity[1]
             self.timer-=1
+        elif self.timer == 0 and self.movement_phase != len(self.destinations)-1 and self.destinations != [] and self.times[self.movement_phase+1] == 0:
+            self.movement_phase+=1
+            self.internal_coords[0], self.internal_coords[1]=self.destinations[self.movement_phase]
+            self.timer=self.times[self.movement_phase]
+        elif self.timer == 0 and self.movement_phase != len(self.destinations)-1 and self.destinations != [] and self.times[0] == 0 and self.movement_phase == 0:
+            self.internal_coords[0], self.internal_coords[1]=self.destinations[self.movement_phase]
+            self.movement_phase+=1
+            self.timer=self.times[self.movement_phase]
+            self.velocity=((self.destinations[self.movement_phase][0]-self.internal_coords[0])/self.timer, (self.destinations[self.movement_phase][1]-self.internal_coords[1])/self.timer)
         elif self.timer == 0 and self.movement_phase != len(self.destinations)-1 and self.destinations != []:
-            self.movement_phase += 1
+            self.movement_phase+=1
             self.timer=self.times[self.movement_phase]
             self.velocity=((self.destinations[self.movement_phase][0]-self.internal_coords[0])/self.timer, (self.destinations[self.movement_phase][1]-self.internal_coords[1])/self.timer)
         else:
@@ -186,7 +199,8 @@ class Mob(sprite.Sprite):
                     del self.items[key]
                     break
                 else:
-                    del item
+                    if subitem == item:
+                        self.items[key].pop(self.items[key].index(subitem))
                     break
             else:
                 continue
@@ -223,11 +237,15 @@ class Item(sprite.Sprite):
         self.velocity=(0,0)
 
     def startmove(self,dests:list[Coord],times:list[int]): #destination as a coord tuple, time in frames
-        if self.timer==0: #change to accept lists of dests and coords
+        if self.timer==0:
             self.destinations=dests
             self.times=times
             self.timer=self.times[self.movement_phase]
-            self.velocity=((self.destinations[self.movement_phase][0]-self.internal_coords[0])/self.timer, (self.destinations[self.movement_phase][1]-self.internal_coords[1])/self.timer)
+            if self.timer != 0:
+                self.velocity=((self.destinations[self.movement_phase][0]-self.internal_coords[0])/self.timer, (self.destinations[self.movement_phase][1]-self.internal_coords[1])/self.timer)
+        else:
+            self.destinations+=dests
+            self.times+=times
 
     def update(self):
         global move_hovering_over
@@ -236,12 +254,18 @@ class Item(sprite.Sprite):
             self.internal_coords[1]+=self.velocity[1]
             self.timer-=1
         elif self.timer == 0 and self.movement_phase != len(self.destinations)-1 and self.destinations != []:
-            self.movement_phase += 1
-            self.timer=self.times[self.movement_phase]
-            self.velocity=((self.destinations[self.movement_phase][0]-self.internal_coords[0])/self.timer, (self.destinations[self.movement_phase][1]-self.internal_coords[1])/self.timer)
+            temp=True
+            self.movement_phase+=1
+            if self.timer == 0 and self.times[self.movement_phase] == 0:
+                self.internal_coords[0], self.internal_coords[1]=self.destinations[self.movement_phase]
+                temp=False
+            if temp:
+                self.timer=self.times[self.movement_phase]
+                self.velocity=((self.destinations[self.movement_phase][0]-self.internal_coords[0])/self.timer, (self.destinations[self.movement_phase][1]-self.internal_coords[1])/self.timer)
         else:
             self.destinations=[]
             self.times=[]
+            self.movement_phase=0
         if attack_progressing and selected == self:
             draw.rect(screen,ORANGE,Rect(self.display_rect.left-5,self.display_rect.top-5,self.display_rect.width,self.display_rect.height),5)
         if selected == self and self.display_rect.collidepoint(mouse.get_pos()) and not attack_progressing:
@@ -366,8 +390,7 @@ class Player():
         if type(target) == Mob:
             self.field[pos-1]=target
             target.switch_sprite("cut")
-            #target.rect.x, target.rect.y=self.field_pos[pos-1]
-            target.internal_coords[0], target.internal_coords[1]= self.field_pos[pos-1][0], self.field_pos[pos-1][1]+copysign(cut_dim[1],1.5-self.player_number)
+            target.startmove([(self.field_pos[pos-1][0], self.field_pos[pos-1][1]+copysign(cut_dim[1],1.5-self.player_number))],[0])
             target.startmove([self.field_pos[pos-1]],[15])
             if not ignore_cost:
                 self.souls -= target.cost
@@ -468,10 +491,13 @@ def deckbuilder(list_to_use:dict[Card,int]) -> list[Card]:
 
 def draw_card(player:Player,amount:int=1) -> list[Card]|Card:
     global deck
+    global markers
+    if deck == []:
+        return
     mob_deck=[mob for mob in deck if type(mob)==Mob]
     card_list=[]
     for i in range(amount):
-        if player.player_number==1:
+        if markers["deck built"] == True or player.player_number == 1:
             card=deck.pop()
         else:
             card=mob_deck.pop()
@@ -479,7 +505,7 @@ def draw_card(player:Player,amount:int=1) -> list[Card]|Card:
         player.hand.append(card)
         card_list.append(card)
         card.internal_coords=[100,262]
-        card.startmove([(player.hand_pos[0]+card_dim[0]*len(player.hand),player.hand_pos[1])],[30])
+        card.startmove([(player.hand_pos[0]+card_dim[0]*(len(player.hand)-1),player.hand_pos[1])],[30])
     if len(card_list) == 1:
         return card_list[0]
     else:
@@ -512,7 +538,8 @@ def atk_check(func) -> bool: #decorator that applies to all attacks, first decor
                 result.append([kwargs["target"]])
             for card in result[2]:
                 if "on attack" in kwargs["origin"].items:
-                    for subitem in kwargs["origin"].items["on attack"]:
+                    maybe=tuple(kwargs["origin"].items["on attack"])
+                    for subitem in maybe:
                         result=subitem.effect(origin=kwargs["origin"],target=card,player=kwargs["player"],original=result,item=subitem)
                 if card.proxy != None:
                     card=card.proxy
@@ -524,7 +551,7 @@ def atk_check(func) -> bool: #decorator that applies to all attacks, first decor
                     card.passives["on hurt"](origin=kwargs["origin"],target=card,player=kwargs["player"],damage=result[1])
                 if "on hurt" in card.items and result[1] != 0:
                     for subitem in card.items["on hurt"]:
-                        subitem.effect(origin=kwargs["origin"],target=card,player=kwargs["player"],damage=result[1],card=subitem)
+                        subitem.effect(origin=kwargs["origin"],target=card,player=kwargs["player"],damage=result[1],item=subitem)
             return result[0]
         else:
             return func(origin=kwargs["origin"],target=kwargs["target"],player=kwargs["player"],noattack=True)[0]
@@ -678,8 +705,7 @@ def knife_thing(**kwargs:Attack_params) -> tuple[Literal[True],int]:
 @itm_check
 def loot_chest_draw(**kwargs): #item
     if "only_targeting" not in kwargs:
-        for i in range(2):
-            kwargs["player"].hand.append(deck.pop())
+        draw_card(kwargs["player"],2)
     else:
         return [None]
 
@@ -708,7 +734,7 @@ def monkey(**kwargs):
 
 @psv_check
 def mystery_egg(**kwargs): #passive: on this turn
-    kwargs["player"].hand.append(deck.pop())
+    draw_card(kwargs["player"])
 
 @abl_check
 def nah_id_win(**kwargs): #ability
@@ -879,8 +905,8 @@ def trident_stab(**kwargs): #item
 
 @psv_check
 def undead(**kwargs): #passive: on hurt
-    if kwargs["origin"].health == kwargs["origin"].max_health and kwargs["damage"] >= kwargs["origin"].health:
-        kwargs["origin"].health=1
+    if (kwargs["target"].health+kwargs["damage"]) == kwargs["target"].max_health and kwargs["damage"] >= kwargs["target"].max_health:
+        kwargs["target"].health=1
 
 @atk_check
 def warding_laser(**kwargs:Attack_params) -> tuple[Literal[False],int]: #attack
@@ -956,7 +982,7 @@ game_overs=("win", "tie", "lose")
 PORT=6543
 effect_sprites={"psn":image.load("psn.png").convert_alpha(),"aquatised":transform.scale(image.load("aquatised.png"),(23,23)).convert()}
 monkey_sprite=transform.scale(image.load("monkey.png"),(840*(window_dim[1]/859),window_dim[1])).convert_alpha()
-subturn_sprites=[transform.scale(image.load("abs_subturn_none.png"),(150,360)).convert(),transform.scale(image.load("abs_subturn_1.webp"),(150,360)).convert(),transform.scale(image.load("abs_subturn_2.webp"),(150,360)).convert(),transform.scale(image.load("abs_subturn_3.png"),(150,360)).convert()]
+subturn_sprites=[transform.scale(image.load("abs_subturn_none.png"),(150,360)).convert_alpha(),transform.scale(image.load("abs_subturn_1.webp"),(150,360)).convert_alpha(),transform.scale(image.load("abs_subturn_2.webp"),(150,360)).convert_alpha(),transform.scale(image.load("abs_subturn_3.png"),(150,360)).convert_alpha()]
 #sys.excepthook=excepthook
 game_id=str(int(tm.time()))
 
@@ -1023,7 +1049,6 @@ zombie=r'Mob("Zombie",2,4,[],[bite],{"on hurt":undead},{},"undead","cavern","blu
 #Mob()
 
 decklist={zombie:30,sword:10}
-#playername=input("Enter your name: ")
 playername="J1"
 player1=Player(playername,1,(fields_anchor[0],y_rails[1]+cut_dim[1]+card_spacing_y),[(x_rails[0],y_rails[1]),(x_rails[1],y_rails[1]),(x_rails[2],y_rails[1])])
 player2:Player=''
@@ -1334,29 +1359,16 @@ while running:
         if markers["deck built"] == False:
             turn = 1
             deck = deckbuilder(decklist)
-            #'''
-            mob_deck=[card for card in deck if type(card)==Mob]
-            for i in range(3):
-                player2.hand.append(mob_deck.pop())
-                player2.add_to_field(0,i+1,True)
-            deck = [card for card in deck if card not in player2.field]
-            for i in range(starting_cards):
-                player1.hand.append(deck.pop())
-                player2.hand.append(deck.pop())
-            #'''
-            '''
             draw_card(player2,8)
             for i in range(3):
                 player2.add_to_field(i,i+1,True)
             draw_card(player1,5)
-            '''
             markers["deck built"]=True
         if not markers["start of turn called"] and turn != 1:
             player1.souls += turn
             player2.souls += turn
-            for i in range(drawing_cards):
-                player1.hand.append(deck.pop())
-                player2.hand.append(deck.pop())
+            draw_card(player1,drawing_cards)
+            draw_card(player2,drawing_cards)
             start_of_turn()
             markers["start of turn called"]=True
         if turn == 1:
@@ -1511,9 +1523,12 @@ while running:
     5. Does item application count as a subturn?
     8. Get item stealing to work
     9. Don't constantly load images, only do it when selected changes
+    10. Item application moving
+    11. Cards do a little jump when their passives activate
 
     Bugs:
-    1. If cards are drawn for player2 using draw_card and added to the field, they go way off the screen somewhere, but they work normally with the old method. Since draw_card also calls start_move, I think its some interaction between start+move called when the card is already moving. I thought I already put safeguards against that, but anyways, I'll need to do further testing.
+    1. Cards placed into the field don't move to their lower positions (the "teleporting" part)
+    2. FPS drop when game end screen comes into full opacity
 
     Conditions:
     "end of turn": Called at the end of the attack phase
