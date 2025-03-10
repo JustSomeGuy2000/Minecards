@@ -1,10 +1,11 @@
-from collections.abc import Callable
 from __future__ import annotations
+from collections.abc import Callable
 from typing import Literal
 from random import shuffle
 from math import copysign
 from pygame import *
 import traceback as t
+import binascii as b
 import time as tm
 import socket
 import select
@@ -22,6 +23,10 @@ type Attack_params = dict[Literal["origin"]:Card,Literal["target"]:Card,Literal[
 
 window_dim=(1500,850)
 screen=display.set_mode(window_dim)
+font.init()
+mjgs=font.Font(r"Assets\mojangles.ttf",40)
+small_font=font.Font(r"Assets\mojangles.ttf",20)
+large_font=font.Font(r"Assets\mojangles.ttf",80)
 
 class Mob(sprite.Sprite):
     def __init__(self,name:str,cost:int,health:int,abilities:list[Ability],attacks:list[Callable],passives:dict[Literal["end of turn","start of turn","on death","on hurt","on attack","when played","on this turn","always","end this turn"],Callable],items:dict[Literal["end of turn","start of turn","on death","on hurt","on attack","when played","on this turn"],list[Item]],mob_class:Literal["undead","arthropod","aquatic","human","misc"],biome:Literal["plains","cavern","ocean","swamp"],border:Literal["blue","pink"],sprite:Path,init_pos:Coord,cut_sprite:Path,move_positions:list[tuple[int,int,int,int]],**kwargs):
@@ -457,6 +462,59 @@ class Ability():
             tempt=[mob for mob in player1.field if (mob != None and mob.proxy == None and mob.proxy_for == None and mob != selected)]
         return tempt
 
+class DeckPreset(): #this gets confusing fast so I'll be leaving some comments
+    def __init__(self,name:str,number:int,colour:tuple[int,int,int],mobs:dict[Card,int],items:dict[Card,int]):
+        self.name=name
+        self.number=number
+        self.colour=colour
+        self.mobs:dict[str,int]={eval(x):mobs[x] for x in list(mobs.keys())} #strings are those that represent the card info that can be evaled into card objects, ints are amounts
+        self.items:dict[str,int]={eval(x):items[x] for x in list(items.keys())}
+        self.original_mobs:dict[str,int]=mobs #strings are names of the variables that represent mobs, supposed to be evaled
+        self.original_items:dict[str,int]=items
+        self.outer_rect=Rect(0,100+(128*number),window_dim[0],128) #these two hold the position of the deck in the preset screen
+        self.inner_rect=Rect(20,100+20+(128*number),window_dim[0]-40,88)
+        self.title_bg_rect=Rect(10,10,window_dim[0]-20,88)
+        self.text=large_font.render(name,True,luminance(colour))
+        self.mob_rects=[] #mob hitboxes
+        for card in self.mobs:
+            self.mob_rects.append(Rect(((cut_dim[0]+20)*list(self.mobs.keys()).index(card))%(window_dim[0]-40)+20,((cut_dim[0]+100)*list(self.mobs.keys()).index(card))//window_dim[1]+155,cut_dim[0],cut_dim[1])) # don't question the math unless it doesn't work. In that case, well, time to use some elbow grease, eh?
+        self.item_rects=[] #item hitboxes
+        for card in self.items:
+            self.item_rects.append(Rect(((cut_dim[0]+20)*list(self.items.keys()).index(card))%(window_dim[0]-40)+20,((cut_dim[0]+100)*list(self.items.keys()).index(card))//window_dim[1]+255+cut_dim[1],cut_dim[0],cut_dim[1]))
+        self.mob_tiles=[] #mob images
+        for card in self.mobs:
+            self.mob_tiles.append(transform.scale(eval(card).cut_sprite,cut_dim))
+        self.item_tiles=[] #item images
+        for card in self.items:
+            self.item_tiles.append(transform.scale(eval(card).cut_sprite,cut_dim))
+        self.mob_infos=[] #mob large images, displayed when selected
+        for card in self.mobs:
+            self.mob_infos.append(image.load(eval(card).original_sprite).convert())
+        self.item_infos=[] #item large images, displayed when selected
+        for card in self.items:
+            self.item_infos.append(image.load(eval(card).original_sprite).convert())
+            
+    def to_dict(self):
+        return [self.name,{"number":self.number,"colour":self.colour,"mobs":self.original_mobs,"items":self.original_items}]
+    
+    def display(self):
+        global selected_deck
+        if selected_deck == None:
+            draw.rect(screen,(0,0,0),self.outer_rect)
+            draw.rect(screen,self.colour,self.inner_rect)
+            screen.blit(self.text,(self.inner_rect.x+10,self.inner_rect.y+10))
+        elif selected_deck == self:
+            draw.rect(screen,self.colour,self.title_bg_rect)
+            screen.blit(self.text,(window_dim[0]/2-self.text.get_width()/2,15))
+            screen.blit(deck_mobs_text,(10,110))
+            screen.blit(deck_items_text,(10,380))
+            for i in range(len(self.mob_rects)):
+                screen.blit(self.mob_tiles[i],self.mob_rects[i])
+                screen.blit(mjgs.render(f"x{list(self.mobs.values())[i]}",True,(0,0,0)),(self.mob_rects[i].x+(cut_dim[0]/2-mjgs.size(f"x{list(self.mobs.values())[i]}")[0]/2),self.mob_rects[i].y+cut_dim[1]+10))
+            for i in range(len(self.item_rects)):
+                screen.blit(self.item_tiles[i],self.item_rects[i])
+                screen.blit(mjgs.render(f"x{list(self.items.values())[i]}",True,(0,0,0)),(self.item_rects[i].x+(cut_dim[0]/2-mjgs.size(f"x{list(self.items.values())[i]}")[0]/2),self.item_rects[i].y+cut_dim[1]+10))
+
 def excepthook(type, value, traceback):
     print(f"Error: {type.__name__}\nReason: {value}\nTraceback :\n{str(t.format_tb(traceback))}")
     name="crash_log_"+str(tm.time())+".txt"
@@ -529,6 +587,13 @@ def denest(dictionary:dict) -> list:
 
 def len_items(items:dict) -> int:
     return len(denest(items))
+
+def luminance(colour:tuple[int,int,int]):
+    brightness=0.299*colour[0] + 0.587*colour[1] + 0.114*colour[2]
+    if brightness <= 0.5:
+        return (255,255,255)
+    else:
+        return (0,0,0)
 
 def atk_check(func) -> bool: #decorator that applies to all attacks, first decorator layer
     def atk_wrapper(**kwargs):
@@ -991,6 +1056,7 @@ monkey_sprite=transform.scale(image.load(r"Assets\monkey.png"),(840*(window_dim[
 subturn_sprites=[transform.scale(image.load(r"Assets\abs_subturn_none.png"),(150,360)).convert_alpha(),transform.scale(image.load(r"Assets\abs_subturn_1.webp"),(150,360)).convert_alpha(),transform.scale(image.load(r"Assets\abs_subturn_2.webp"),(150,360)).convert_alpha(),transform.scale(image.load(r"Assets\abs_subturn_3.png"),(150,360)).convert_alpha()]
 #sys.excepthook=excepthook
 game_id=str(int(tm.time()))
+infofile=open(r"Assets\info.bin","rb")
 
 #variables
 running=True
@@ -1014,6 +1080,8 @@ move_hovering_over=None #tuple of Rect of attack being hovered over and attack f
 targets=[]
 until_end=0
 ability_selected=False
+infojson=json.loads(b.unhexlify(infofile.read()))
+selected_deck:None|DeckPreset=None
 
 #define cards here
 #Note: cards for deck use are defined by deckbuilder(), which takes these strings and eval()s them into objects
@@ -1054,17 +1122,17 @@ witch=r'Mob("Witch",3,4,[Ability(1,witch_poison,"player2 field"),Ability(1,witch
 zombie=r'Mob("Zombie",2,4,[],[bite],{"on hurt":undead},{},"undead","cavern","blue",r"Sprites\Zombie.png",(0,0),r"Cut Sprites\Zombie.png",[(987,512,1323,579)])'
 #Mob()
 
-decklist={zombie:30,sword:10}
+decklist:dict[Card,int]={zombie:30,sword:10}
+deck_presets:list[DeckPreset]=[]
+if infojson != {}:
+    for deck_name in infojson:
+        deck_presets.append(DeckPreset(deck_name,infojson[deck_name]["number"],infojson[deck_name]["colour"],infojson[deck_name]["mobs"],infojson[deck_name]["items"]))
 playername="J1"
 player1=Player(playername,1,(fields_anchor[0],y_rails[1]+cut_dim[1]+card_spacing_y),[(x_rails[0],y_rails[1]),(x_rails[1],y_rails[1]),(x_rails[2],y_rails[1])])
 player2:Player=''
 
 display.set_caption("Minecards")
 
-font.init()
-mjgs=font.Font("mojangles.ttf",40)
-small_font=font.Font("mojangles.ttf",20)
-large_font=font.Font("mojangles.ttf",80)
 beta_text=mjgs.render("Closed Beta",True,(255,100,0))
 host_text=ClickableText(mjgs,"Create Game",(0,0,0),(window_dim[0]/2-mjgs.size("Create Game")[0]/2,550))
 connect_text=ClickableText(mjgs,"Join Game",(0,0,0),(window_dim[0]/2-mjgs.size("Join Game")[0]/2,650))
@@ -1084,7 +1152,9 @@ decks_to_menu_text=ClickableText(mjgs,"Back to menu",(0,0,0),(window_dim[0]/2-mj
 decks_title_text=large_font.render("My Decks",True,(0,0,0))
 create_deck_text=ClickableText(mjgs,"+ Create new deck",(20,100,140),(window_dim[0]-mjgs.size("+ Create new deck")[0]-100,750))
 delete_deck_text=ClickableText(mjgs,"Delete deck",(200,0,0),(100,750))
-
+deck_inspects_to_presets_text=ClickableText(mjgs,"Back",(255,0,0),(100,750))
+deck_mobs_text=mjgs.render("Mobs:",True,(0,0,0))
+deck_items_text=mjgs.render("Items:",True,(0,0,0))
 while running:
     screen.blit(background,(0,0))
     if markers["monkey"] != 0:
@@ -1095,6 +1165,10 @@ while running:
 
     for e in event.get():
         if e.type == QUIT:
+            infofile.close()
+            infofile=open(r"Assets\info.bin","wb")
+            infofile.write(b.hexlify(json.dumps({x[0]:x[1] for x in [preset.to_dict() for preset in deck_presets]}).encode()))
+            infofile.close()
             running=False
         elif e.type == MOUSEBUTTONUP and state not in game_overs and not markers["freeze"]:
             pos=mouse.get_pos()
@@ -1120,6 +1194,31 @@ while running:
             elif state == "deck screen":
                 if decks_to_menu_text.textrect.collidepoint(pos):
                     state="menu"
+                    selected_deck=None
+                    selected=None
+                elif selected_deck == None:
+                    for preset in deck_presets:
+                        if preset.outer_rect.collidepoint(pos):
+                            selected_deck=preset
+                elif deck_inspects_to_presets_text.textrect.collidepoint(pos):
+                    selected=None
+                    selected_deck=None
+                else:
+                    temp=False
+                    if deck_inspects_to_presets_text.textrect.collidepoint(pos):
+                        selected_deck=None
+                    for card_rect in selected_deck.mob_rects:
+                        if card_rect.collidepoint(pos):
+                            selected=selected_deck.mob_infos[selected_deck.mob_rects.index(card_rect)]
+                            temp=True
+                        if not temp:
+                            selected=None
+                    for card_rect in selected_deck.item_rects:
+                        if card_rect.collidepoint(pos):
+                            selected=selected_deck.item_infos[selected_deck.item_rects.index(card_rect)]
+                            temp=True
+                        if not temp:
+                            selected=None
 
             if state == "game" and not attack_progressing:
                 for card in player1.field:
@@ -1364,9 +1463,19 @@ while running:
 
     elif state == "deck screen":
         screen.blit(decks_to_menu_text.text, decks_to_menu_text.position)
-        screen.blit(decks_title_text,(window_dim[0]/2-large_font.size("My Decks")[0]/2,25))
-        screen.blit(create_deck_text.text,create_deck_text.position)
-        screen.blit(delete_deck_text.text,delete_deck_text.position)
+        if selected_deck == None:
+            screen.blit(decks_title_text,(window_dim[0]/2-large_font.size("My Decks")[0]/2,25))
+            screen.blit(create_deck_text.text,create_deck_text.position)
+            screen.blit(delete_deck_text.text,delete_deck_text.position)
+            if deck_presets != []:
+                for preset in deck_presets:
+                    preset.display()
+        else:
+            screen.blit(deck_inspects_to_presets_text.text,deck_inspects_to_presets_text.position)
+            selected_deck.display() #actually displaying the deck is in DeckPreset.display()
+            if selected != None:
+                large_image=transform.scale(selected,(card_dim[0]*3,card_dim[1]*3)).convert()
+                screen.blit(large_image,(window_dim[0]/2-card_dim[0]*1.5,100))
 
     elif state == "pregame":
         screen.blit(pregame_text,(window_dim[0]/2-mjgs.size("Loading...")[0]/2,window_dim[1]/2))
@@ -1550,6 +1659,8 @@ while running:
     9. Don't constantly load images, only do it when selected changes
     10. Item application moving
     11. Cards do a little jump when their passives activate
+    12. Change deck format to have separate sections for mobs and items
+    13. Decks: 8 mobs, 10 items, items are drawn, all mobs are already in hand
 
     Bugs:
     1. FPS drop when game end screen comes into full opacity
