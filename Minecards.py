@@ -585,7 +585,7 @@ class DeckPreset(): #this gets confusing fast so I'll be leaving some comments
         global editing_deck_title
         if e.key == K_BACKSPACE:
             self.name = self.name[:-1]
-        elif e.key == K_RETURN:
+        elif e.key == K_RETURN or e.key == K_ESCAPE:
             editing_deck_title=False
         else:
             self.name += e.unicode
@@ -675,14 +675,22 @@ def draw_card(player:Player,amount:int=1,override=None) -> list[Card]|Card:
     else:
         return card_list
 
-def denest(dictionary:dict) -> list:
+def denest(container:dict) -> list:
     result=[]
-    for key in dictionary:
-        if type(dictionary[key]) != list:
-            result.append(dictionary[key])
-        else:
-            for item in dictionary[key]:
+    if type(container) == dict:
+        keys=list(container.keys())
+    elif type(container) == list:
+        keys=[i for i in range(len(container))]
+    for key in keys:
+        if type(container[key]) != list:
+            result.append(container[key])
+        elif type(container[key]) == list:
+            for item in container[key]:
                 result.append(item)
+        elif type(container[key]) == dict:
+            result.append(denest(container[key]))
+        else:
+            result.append(None)
     return result
 
 def len_items(items:dict) -> int:
@@ -1166,6 +1174,30 @@ game_id=str(int(tm.time()))
 infofile=open(r"Assets\info.bin","rb")
 colour_wheel=transform.scale(image.load(r"Assets\colour_wheel.png").convert_alpha(),(70,70))
 colour_wheel_rect=Rect(window_dim[0]-90,20,70,70)
+cards_sidebar_button=transform.scale(image.load(r"Assets\cards_sidebar.png"),(70,70)).convert_alpha()
+cards_sidebar_rect=Rect((window_dim[0]-95,115),(70,70))
+cards_sidebar_up=transform.rotate(cards_sidebar_button,-90)
+cards_sidebar_up_rect=Rect((cards_sidebar_rect.x-window_dim[0]/2,cards_sidebar_rect.y+120),(70,70))
+cards_sidebar_down=transform.rotate(cards_sidebar_button,90)
+cards_sidebar_down_rect=Rect((cards_sidebar_rect.x-window_dim[0]/2,cards_sidebar_rect.y+230),(70,70))
+cards_sidebar_page=0
+all_cut=[]
+temp=[]
+temp_n=0
+cuts=[file for file in os.scandir("Cut Sprites")]
+for file in cuts:
+    temp.append(transform.scale(image.load(f"Cut Sprites\\{file.name}"),cut_dim))
+    temp_n+=1
+    if temp_n == 9 or file == cuts[-1]:
+        temp_n=0
+        all_cut.append(temp)
+        temp=[]
+all_cut_rects=[]
+for page in all_cut:
+    for i in range(len(page)):
+        temp.append(Rect(((cut_dim[0]+20)*i)%(window_dim[0]/2)+window_dim[0]/2+20,(cut_dim[1]+40)*(i//3)+130,cut_dim[0],cut_dim[1]))
+    all_cut_rects.append(temp)
+    temp=[]
 
 #variables
 running=True
@@ -1195,6 +1227,7 @@ selected_large=None
 deleting_deck=False
 editing_deck_title=False
 choosing_colour=False
+cards_sidebar=False
 
 #define cards here
 #Note: cards for deck use are defined by deckbuilder(), which takes these strings and eval()s them into objects
@@ -1356,6 +1389,14 @@ while running:
                             selected=None
                             selected_large=None
                             selected_deck.set_renders(None)
+                    if cards_sidebar_rect.collidepoint(pos):
+                        cards_sidebar_button=transform.rotate(cards_sidebar_button,180)
+                        cards_sidebar_rect.x+=copysign(window_dim[0]/2,int(cards_sidebar)-1)
+                        cards_sidebar=not cards_sidebar
+                    if cards_sidebar_up_rect.collidepoint(pos) and cards_sidebar_page != 0:
+                        cards_sidebar_page-=1
+                    if cards_sidebar_down_rect.collidepoint(pos) and cards_sidebar_page != len(all_cut)-1:
+                        cards_sidebar_page+=1
 
             if state == "game" and not attack_progressing:
                 for card in player1.field:
@@ -1612,7 +1653,26 @@ while running:
         else:
             screen.blit(deck_inspects_to_presets_text.text,deck_inspects_to_presets_text.position)
             selected_deck.display() #actually displaying the deck is in DeckPreset.display()
-            
+            draw.circle(screen,(50,190,220),(cards_sidebar_rect.x+35,cards_sidebar_rect.y+35),40)
+            screen.blit(cards_sidebar_button,(cards_sidebar_rect.x,cards_sidebar_rect.y))
+            if cards_sidebar:
+                draw.rect(screen,(90,180,30),Rect(window_dim[0]/2,115,window_dim[0]/2-20,window_dim[1]-225))
+                if cards_sidebar_page == 0:
+                    draw.circle(screen,(128,128,128),(cards_sidebar_up_rect.x+35,cards_sidebar_up_rect.y+35),40)
+                else:
+                    draw.circle(screen,(50,190,220),(cards_sidebar_up_rect.x+35,cards_sidebar_up_rect.y+35),40)
+                screen.blit(cards_sidebar_up,(cards_sidebar_up_rect.x,cards_sidebar_up_rect.y))
+                if cards_sidebar_page == len(all_cut)-1:
+                    draw.circle(screen,(128,128,128),(cards_sidebar_down_rect.x+35,cards_sidebar_down_rect.y+35),40)
+                else:
+                    draw.circle(screen,(50,190,220),(cards_sidebar_down_rect.x+35,cards_sidebar_down_rect.y+35),40)
+                screen.blit(cards_sidebar_down,(cards_sidebar_down_rect.x,cards_sidebar_down_rect.y))
+                screen.blit(mjgs.render(f"{cards_sidebar_page+1}/{len(all_cut)}",True,(0,0,0)),(cards_sidebar_down_rect.x,cards_sidebar_down_rect.y-mjgs.get_height()/2-18))
+                for i in range(len(all_cut[cards_sidebar_page])):
+                    screen.blit(all_cut[cards_sidebar_page][i],all_cut_rects[cards_sidebar_page][i])
+                    if all_cut_rects[cards_sidebar_page][i].collidepoint(mouse.get_pos()):
+                        draw.rect(screen,(15,180,220),Rect(all_cut_rects[cards_sidebar_page][i].x+15,all_cut_rects[cards_sidebar_page][i].y+cut_dim[1]/2+5,cut_dim[0]-20,70))
+                        screen.blit(mjgs.render("Info",True,(0,0,0)),(all_cut_rects[cards_sidebar_page][i].x+10,all_cut_rects[cards_sidebar_page][i].y+cut_dim[1]/2+5))
 
     elif state == "pregame":
         screen.blit(pregame_text,(window_dim[0]/2-mjgs.size("Loading...")[0]/2,window_dim[1]/2))
@@ -1797,8 +1857,9 @@ while running:
     10. Item application moving
     11. Cards do a little jump when their passives activate
     12. Decks: 8 mobs, 10 items, items are drawn, all mobs are already in hand
-    13. Change DeckPreset.unpack() to allow re-geberating specific variables (to prevent FPS drop from continously calling it from DeckPreset.deck_change_clicks())
-    14. CURRENT: Implement setting colour for decks
+    13. Change DeckPreset.unpack() to allow re-generating specific variables (to prevent FPS drop from continously calling it from DeckPreset.deck_change_clicks())
+    14. Implement setting colour for decks
+    15. CURRENT: Continue from line 1675
 
     Bugs:
     1. FPS drop when game end screen comes into full opacity
