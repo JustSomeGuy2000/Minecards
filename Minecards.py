@@ -498,7 +498,7 @@ class Tile(): #a simplified container for card data
         return Tile(new_name,new_full,new_cut,new_kind,new_border,new_pos)
 
 class DeckPreset(): #this gets confusing fast so I'll be leaving some comments
-    def __init__(self,name:str,number:int,colour:tuple[int,int,int],mobs:dict[Card,int],items:dict[Card,int]):
+    def __init__(self,name:str,number:int,colour:tuple[int,int,int],mobs:dict[str,int],items:dict[str,int]):
         self.name=name
         self.number=number
         self.colour=colour
@@ -534,30 +534,31 @@ class DeckPreset(): #this gets confusing fast so I'll be leaving some comments
             screen.blit(self.text,(window_dim[0]/2-self.text.get_width()/2,15))
             screen.blit(deck_mobs_text,(10,110))
             screen.blit(deck_items_text,(10,380))
-            for i in range(len(self.mob_rects)):
-                if selected == self.mob_rects[i]:
-                    draw.rect(screen,(255,255,255),Rect(self.mob_rects[i].x-5,self.mob_rects[i].y-5,cut_dim[0]+10,cut_dim[1]+10))
-                screen.blit(self.mob_tiles[i],self.mob_rects[i])
-                screen.blit(mjgs.render(f"x{list(self.mobs.values())[i]}",True,(0,0,0)),(self.mob_rects[i].x+(cut_dim[0]/2-mjgs.size(f"x{list(self.mobs.values())[i]}")[0]/2),self.mob_rects[i].y+cut_dim[1]+10))
-            for i in range(min(len(self.item_rects),8)):
-                i=i+self.item_offset
-                if selected == self.item_rects[i]:
-                    draw.rect(screen,(255,255,255),Rect(self.item_rects[i].x-5,self.item_rects[i].y-5,cut_dim[0]+10,cut_dim[1]+10))
-                screen.blit(self.item_tiles[i],(self.item_rects[i].x-(cut_dim[0]+20)*self.item_offset,self.item_rects[i].y))
-                screen.blit(mjgs.render(f"x{list(self.items.values())[i]}",True,(0,0,0)),(self.item_rects[i].x+(cut_dim[0]/2-mjgs.size(f"x{list(self.items.values())[i]}")[0]/2),self.item_rects[i].y+cut_dim[1]+10))
+            for mob in list(self.mobs.keys()):
+                if selected == mob:
+                    draw.rect(screen,(255,255,255),Rect(mob.rect.x-5,mob.rect.y-5,cut_dim[0]+10,cut_dim[1]+10))
+                screen.blit(mob.cut_sprite,mob.rect)
+                screen.blit(mjgs.render(f"x{self.mobs[mob]}",True,(0,0,0)),(mob.rect.x+(cut_dim[0]/2-mjgs.size(f"x{self.mobs[mob]}")[0]/2),mob.rect.y+cut_dim[1]+10))
+            for i in range(min(len(self.items),8)):
+                i=min(i+self.item_offset,len(self.items)-1)
+                item=list(self.items.keys())[i]
+                if selected == item:
+                    draw.rect(screen,(255,255,255),Rect(item.rect.x-5,item.rect.y-5,cut_dim[0]+10,cut_dim[1]+10))
+                screen.blit(item.cut_sprite,(item.rect.x-(cut_dim[0]+20)*self.item_offset,item.rect.y))
+                screen.blit(mjgs.render(f"x{self.items[item]}",True,(0,0,0)),(item.rect.x+(cut_dim[0]/2-mjgs.size(f"x{self.items[item]}")[0]/2)-(cut_dim[0]+20)*self.item_offset,item.rect.y+cut_dim[1]+10))
             if self.item_offset > 0:
                 draw.circle(screen,M_BLUE,(items_left[1].x+20,items_left[1].y+20),25)
                 screen.blit(items_left[0],items_left[1])
-            if len(self.item_rects) > 8 and not 8+self.item_offset == len(self.item_rects):
+            if len(list(self.items.keys())) > 8 and not 8+self.item_offset == len(list(self.items.keys())):
                 draw.circle(screen,M_BLUE,(items_right[1].x+20,items_right[1].y+20),25)
                 screen.blit(items_right[0],items_right[1])
             if selected != None:
-                draw.rect(screen,(15,180,220),Rect(selected.x+10,selected.y+cut_dim[1]/2+5,cut_dim[0]-20,70))
-                if (selected.y < 380 and sum(list(self.original_mobs.values())) > 7) or (selected.y > 380 and sum(list(self.original_items.values())) > 9):
-                    draw.circle(screen,(128,128,128),(selected.x+5+40,selected.y+45),35)
+                draw.rect(screen,(15,180,220),Rect(selected.rect.x+10,selected.rect.y+cut_dim[1]/2+5,cut_dim[0]-20,70))
+                if (selected.rect.y < 380 and sum(list(self.original_mobs.values())) > 7) or (selected.rect.y > 380 and sum(list(self.original_items.values())) > 9):
+                    draw.circle(screen,(128,128,128),(selected.rect.x+5+40,selected.rect.y+45),35)
                 else:
-                    draw.circle(screen,(0,255,0),(selected.x+5+40,selected.y+45),35)
-                draw.circle(screen,(255,0,0),(selected.x+5+120,selected.y+45),35)
+                    draw.circle(screen,(0,255,0),(selected.rect.x+5+40,selected.rect.y+45),35)
+                draw.circle(screen,(255,0,0),(selected.rect.x+5+120,selected.rect.y+45),35)
                 screen.blit(self.info_text.text,self.info_text.position)
                 screen.blit(self.plus1_text.text,self.plus1_text.position)
                 screen.blit(self.minus1_text.text,self.minus1_text.position)
@@ -577,8 +578,8 @@ class DeckPreset(): #this gets confusing fast so I'll be leaving some comments
             self.minus1_text=None
         else:
             self.info_text=ClickableText(mjgs,"Info",(255,255,255),(card_rect.x+45,card_rect.y+cut_dim[1]/2+20))
-            self.plus1_text=ClickableText(mjgs,"+1",(255,255,255),(selected.x+5+17,selected.y+25))
-            self.minus1_text=ClickableText(mjgs,"-1",(255,255,255),(selected.x+5+97,selected.y+25))
+            self.plus1_text=ClickableText(mjgs,"+1",(255,255,255),(selected.rect.x+5+17,selected.rect.y+25))
+            self.minus1_text=ClickableText(mjgs,"-1",(255,255,255),(selected.rect.x+5+97,selected.rect.y+25))
 
     def set_rects(self):
         self.outer_rect=Rect(0,100+(128*self.number),window_dim[0],128) #these two hold the position of the deck in the preset screen
@@ -590,34 +591,34 @@ class DeckPreset(): #this gets confusing fast so I'll be leaving some comments
         temp=False
         temp2=False
         if self.info_text.textrect.collidepoint(pos):
-            if selected in self.mob_rects:
-                selected_large=self.mob_infos[self.mob_rects.index(selected)]
+            if selected in list(self.mobs.keys()):
+                selected_large=selected.full_sprite
                 temp=True
-            elif selected in self.item_rects:
-                selected_large=self.item_infos[self.item_rects.index(selected)]
+            elif selected in list(self.items.keys()):
+                selected_large=selected.full_sprite
                 temp=True
         elif self.plus1_text.textrect.collidepoint(pos):
-            if selected in self.mob_rects and sum(list(self.original_mobs.values())) < 8:
-                self.original_mobs[list(self.original_mobs.keys())[self.mob_rects.index(selected)]]+=1
+            if selected in self.mobs and sum(list(self.original_mobs.values())) < 8:
+                self.original_mobs[list(self.original_mobs.keys())[list(self.mobs.keys()).index(selected)+self.item_offset]]+=1
                 temp=True
-            elif selected in self.item_rects and sum(list(self.original_items.values())) < 10:
-                self.original_items[list(self.original_items.keys())[self.item_rects.index(selected)]]+=1
+            elif selected in self.items and sum(list(self.original_items.values())) < 10:
+                self.original_items[list(self.original_items.keys())[list(self.items.keys()).index(selected)+self.item_offset]]+=1
                 temp=True
         elif self.minus1_text.textrect.collidepoint(pos):
-            if selected in self.mob_rects:
-                self.original_mobs[list(self.original_mobs.keys())[self.mob_rects.index(selected)]]-=1
-                if self.original_mobs[list(self.original_mobs.keys())[self.mob_rects.index(selected)]] == 0:
-                    self.original_mobs.pop(list(self.original_mobs.keys())[self.mob_rects.index(selected)])
+            if selected in self.mobs:
+                self.original_mobs[list(self.original_mobs.keys())[list(self.mobs.keys()).index(selected)]]-=1
+                if self.original_mobs[list(self.original_mobs.keys())[list(self.mobs.keys()).index(selected)]] == 0:
+                    self.original_mobs.pop(list(self.original_mobs.keys())[list(self.mobs.keys()).index(selected)])
                     temp2=True
                 temp=True
-            elif selected in self.item_rects:
-                self.original_items[list(self.original_items.keys())[self.item_rects.index(selected)]]-=1
-                if self.original_items[list(self.original_items.keys())[self.item_rects.index(selected)]] == 0:
-                    self.original_items.pop(list(self.original_items.keys())[self.item_rects.index(selected)])
+            elif selected in self.items:
+                self.original_items[list(self.original_items.keys())[list(self.items.keys()).index(selected)+self.item_offset]]-=1
+                if self.original_items[list(self.original_items.keys())[list(self.items.keys()).index(selected)+self.item_offset]] == 0:
+                    self.original_items.pop(list(self.original_items.keys())[list(self.items.keys()).index(selected)+self.item_offset])
                     temp2=True
                 temp=True
         if temp:
-            self.unpack(self.original_mobs,self.original_items,"whitelist",["items","mobs"])
+            self.unpack(self.original_mobs,self.original_items,"whitelist",["items","mobs","pinks"])
         if temp2:
             self.unpack(self.original_mobs,self.original_items)
         return temp
@@ -625,7 +626,7 @@ class DeckPreset(): #this gets confusing fast so I'll be leaving some comments
     def deck_other_clicks(self,pos:Coord):
         if items_left[1].collidepoint(pos) and self.item_offset > 0:
             self.item_offset -= 1
-        elif items_right[1].collidepoint(pos) and len(self.item_rects) > 8 and not 8+self.item_offset == len(self.item_rects):
+        elif items_right[1].collidepoint(pos) and sum(list(self.items.values())) > 8 and not 8+self.item_offset == sum(list(self.items.values())):
             self.item_offset += 1
     
     def deck_delete_clicks(self,pos:Coord):
@@ -652,47 +653,25 @@ class DeckPreset(): #this gets confusing fast so I'll be leaving some comments
             self.name += e.unicode
         self.text=large_font.render(self.name,True,luminance(self.colour))
     
-    def unpack(self,mobs:dict[Card,int],items:dict[Card,int],targettype:Literal["blacklist"]|Literal["whitelist"]="all",targets:list=[]):
+    def unpack(self,mobs:dict[str,int],items:dict[str,int],targettype:Literal["blacklist"]|Literal["whitelist"]="all",targets:list=[]):
         target_list=["mobs","items","mob_rects","item_rects","mob_tiles","item_tiles","mob_infos","item_infos","pinks"]
         if targettype == "blacklist":
             target_list=[var for var in target_list if var not in targets]
         elif targettype == "whitelist":
             target_list=[var for var in target_list if var in targets]
         if "mobs" in target_list:
-            self.mobs:dict[str,int]={eval(x):mobs[x] for x in list(mobs.keys())} #strings are those that represent the card info that can be evaled into card objects, ints are amounts
+            self.mobs:dict[Tile,int]={d_tiles[x].nearcopy(position=(deck_cards_pos[list(mobs.keys()).index(x)],160)):mobs[x] for x in list(mobs.keys())} #strings are those that represent the card info that can be evaled into card objects, ints are amounts
         if "items" in target_list:
-            self.items:dict[str,int]={eval(x):items[x] for x in list(items.keys())}
-        if "mob_rects" in target_list:
-            self.mob_rects:list[Rect]=[] #mob hitboxes
-            for card in self.mobs:
-                self.mob_rects.append(Rect(((cut_dim[0]+20)*list(self.mobs.keys()).index(card))%(window_dim[0]-40)+20,((cut_dim[0]+100)*list(self.mobs.keys()).index(card))//window_dim[1]+155,cut_dim[0],cut_dim[1])) # don't question the math unless it doesn't work. In that case, well, time to use some elbow grease, eh?
-        if "item_rects" in target_list:
-            self.item_rects:list[Rect]=[] #item hitboxes
-            for card in self.items:
-                self.item_rects.append(Rect(((cut_dim[0]+20)*list(self.items.keys()).index(card))+20,((cut_dim[0]+100)*list(self.items.keys()).index(card))//window_dim[1]+255+cut_dim[1],cut_dim[0],cut_dim[1]))
-        if "mob_tiles" in target_list:
-            self.mob_tiles:list[Surface]=[] #mob images
-            for card in self.mobs:
-                self.mob_tiles.append(transform.scale(eval(card).cut_sprite,cut_dim))
-        if "item_tiles" in target_list:
-            self.item_tiles:list[Surface]=[] #item images
-            for card in self.items:
-                self.item_tiles.append(transform.scale(eval(card).cut_sprite,cut_dim))
-        if "mob_infos" in target_list:
-            self.mob_infos:list[Surface]=[] #mob large images, displayed when selected
-            for card in self.mobs:
-                self.mob_infos.append(transform.scale(image.load(eval(card).original_sprite).convert(),(card_dim[0]*3,card_dim[1]*3)))
-        if "item_infos" in target_list:
-            self.item_infos:list[Surface]=[] #item large images, displayed when selected
-            for card in self.items:
-                self.item_infos.append(transform.scale(image.load(eval(card).original_sprite).convert(),(card_dim[0]*3,card_dim[1]*3)))
+            self.items:dict[Tile,int]={d_tiles[x].nearcopy(position=(deck_cards_pos[list(items.keys()).index(x)],430)):items[x] for x in list(items.keys())}
         if "pinks" in target_list:
             self.pink_mob=False
             self.pink_item=False
-            if len([mob for mob in list(self.mobs.keys()) if eval(mob).border == "pink"]) != 0:
-                self.pink_mob=True
-            if len([item for item in list(self.items.keys()) if eval(item).border == "pink"]) != 0:
-                self.pink_item=True
+            for mob in self.mobs:
+                if mob.border == "pink":
+                    self.pink_mob=True
+            for item in self.items:
+                if item.border == "pink":
+                    self.pink_mob=True
 
 def excepthook(type, value, traceback):
     print(f"Error: {type.__name__}\nReason: {value}\nTraceback :\n{str(t.format_tb(traceback))}")
@@ -1294,6 +1273,7 @@ for page in all_cut:
         temp.append(Rect(((cut_dim[0]+20)*i)%(window_dim[0]/2)+window_dim[0]/2+20,(cut_dim[1]+40)*(i//3)+130,cut_dim[0],cut_dim[1]))
     all_cut_rects.append(temp)
     temp=[]
+deck_cards_pos=[(20+cut_dim[0])*i+20 for i in range(10)]
 
 #variables
 running=True
@@ -1481,19 +1461,19 @@ while running:
                         temp=selected_deck.deck_change_clicks(pos)
                         if temp:
                             break
-                    for card_rect in selected_deck.mob_rects:
-                        if card_rect.collidepoint(pos):
-                            selected=card_rect
-                            selected_deck.set_renders(card_rect)
+                    for mob in selected_deck.mobs:
+                        if mob.rect.collidepoint(pos):
+                            selected=mob
+                            selected_deck.set_renders(mob.rect)
                             temp=True
                         if not temp:
                             selected=None
                             selected_large=None
                             selected_deck.set_renders(None)
-                    for card_rect in selected_deck.item_rects:
-                        if card_rect.collidepoint(pos):
-                            selected=card_rect
-                            selected_deck.set_renders(card_rect)
+                    for item in selected_deck.items:
+                        if item.rect.collidepoint(pos):
+                            selected=item
+                            selected_deck.set_renders(item.rect)
                             temp=True
                         if not temp:
                             selected=None
@@ -1808,15 +1788,15 @@ while running:
                 if not temp:
                     move_hovering_over=None
             temp=False
-            for mob in selected_deck.mob_rects:
-                if mob.collidepoint(mouse.get_pos()):
+            for mob in selected_deck.mobs:
+                if mob.rect.collidepoint(mouse.get_pos()):
                     selected=mob
-                    selected_deck.set_renders(mob)
+                    selected_deck.set_renders(mob.rect)
                     temp=True
-            for item in selected_deck.item_rects:
-                if item.collidepoint(mouse.get_pos()) and selected_deck.item_rects.index(item) >= selected_deck.item_offset and selected_deck.item_rects.index(item) <= selected_deck.item_offset+7:
+            for item in selected_deck.items:
+                if item.rect.collidepoint(mouse.get_pos()) and list(selected_deck.items.keys()).index(item) >= selected_deck.item_offset and list(selected_deck.items.keys()).index(item) <= selected_deck.item_offset+7:
                     selected=item
-                    selected_deck.set_renders(item)
+                    selected_deck.set_renders(item.rect)
                     temp=True
             if not temp:
                 selected_deck.set_renders(None)
