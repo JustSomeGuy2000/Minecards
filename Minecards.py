@@ -9,6 +9,7 @@ import binascii as b
 import time as tm
 import socket
 import select
+import copy
 import json
 import sys
 import os
@@ -423,7 +424,7 @@ class Player():
         self.souls=20
 
 class ClickableText():
-    def __init__(self,font,text:str,colour:tuple[int,int,int],position:Coord):
+    def __init__(self,font:font.Font,text:str,colour:tuple[int,int,int],position:Coord):
         self.text=font.render(text,True,colour)
         self.textrect=self.text.get_rect()
         self.position=position
@@ -462,6 +463,16 @@ class Ability():
             tempt=[mob for mob in player1.field if (mob != None and mob.proxy == None and mob.proxy_for == None and mob != selected)]
         return tempt
 
+class Tile():
+    def __init__(self,name:str,full_sprite:Surface,cut_sprite:Surface,kind:Literal["Mob"]|Literal["Item"],border:Literal["blue"]|Literal["pink"],position:Coord):
+        self.name=name
+        self.full_sprite=full_sprite
+        self.cut_sprite=cut_sprite
+        self.kind=kind
+        self.border=border
+        self.position=position
+        self.rect=cut_sprite.get_rect(x=position[0],y=position[1])
+
 class DeckPreset(): #this gets confusing fast so I'll be leaving some comments
     def __init__(self,name:str,number:int,colour:tuple[int,int,int],mobs:dict[Card,int],items:dict[Card,int]):
         self.name=name
@@ -476,6 +487,9 @@ class DeckPreset(): #this gets confusing fast so I'll be leaving some comments
         self.info_text=None
         self.plus1_text=None
         self.minus1_text=None
+        self.item_offset=0
+        self.pink_mob=False
+        self.pink_item=False
             
     def to_dict(self):
         return [self.name,{"number":self.number,"colour":self.colour,"mobs":self.original_mobs,"items":self.original_items}]
@@ -483,6 +497,7 @@ class DeckPreset(): #this gets confusing fast so I'll be leaving some comments
     def display(self):
         global selected_deck
         global editing_deck_title
+        global cards_sidebar
         if selected_deck == None:
             draw.rect(screen,(0,0,0),self.outer_rect)
             draw.rect(screen,self.colour,self.inner_rect)
@@ -500,34 +515,46 @@ class DeckPreset(): #this gets confusing fast so I'll be leaving some comments
                     draw.rect(screen,(255,255,255),Rect(self.mob_rects[i].x-5,self.mob_rects[i].y-5,cut_dim[0]+10,cut_dim[1]+10))
                 screen.blit(self.mob_tiles[i],self.mob_rects[i])
                 screen.blit(mjgs.render(f"x{list(self.mobs.values())[i]}",True,(0,0,0)),(self.mob_rects[i].x+(cut_dim[0]/2-mjgs.size(f"x{list(self.mobs.values())[i]}")[0]/2),self.mob_rects[i].y+cut_dim[1]+10))
-            for i in range(len(self.item_rects)):
+            for i in range(min(len(self.item_rects),8)):
+                i=i+self.item_offset
                 if selected == self.item_rects[i]:
                     draw.rect(screen,(255,255,255),Rect(self.item_rects[i].x-5,self.item_rects[i].y-5,cut_dim[0]+10,cut_dim[1]+10))
-                screen.blit(self.item_tiles[i],self.item_rects[i])
+                screen.blit(self.item_tiles[i],(self.item_rects[i].x-(cut_dim[0]+20)*self.item_offset,self.item_rects[i].y))
                 screen.blit(mjgs.render(f"x{list(self.items.values())[i]}",True,(0,0,0)),(self.item_rects[i].x+(cut_dim[0]/2-mjgs.size(f"x{list(self.items.values())[i]}")[0]/2),self.item_rects[i].y+cut_dim[1]+10))
+            if self.item_offset > 0:
+                draw.circle(screen,M_BLUE,(items_left[1].x+20,items_left[1].y+20),25)
+                screen.blit(items_left[0],items_left[1])
+            if len(self.item_rects) > 8 and not 8+self.item_offset == len(self.item_rects):
+                draw.circle(screen,M_BLUE,(items_right[1].x+20,items_right[1].y+20),25)
+                screen.blit(items_right[0],items_right[1])
             if selected != None:
-                draw.rect(screen,(255,255,255),Rect(selected.x+cut_dim[0],selected.y-5,cut_dim[0]+10,cut_dim[1]+10))
-                draw.rect(screen,(15,180,220),Rect(selected.x+cut_dim[0]+15,selected.y+cut_dim[1]/2+5,cut_dim[0]-20,70))
-                draw.circle(screen,(0,255,0),(selected.x+cut_dim[0]+5+45,selected.y+45),35)
-                draw.circle(screen,(255,0,0),(selected.x+cut_dim[0]+5+125,selected.y+45),35)
+                draw.rect(screen,(15,180,220),Rect(selected.x+10,selected.y+cut_dim[1]/2+5,cut_dim[0]-20,70))
+                if (selected.y < 380 and sum(list(self.original_mobs.values())) > 7) or (selected.y > 380 and sum(list(self.original_items.values())) > 9):
+                    draw.circle(screen,(128,128,128),(selected.x+5+40,selected.y+45),35)
+                else:
+                    draw.circle(screen,(0,255,0),(selected.x+5+40,selected.y+45),35)
+                draw.circle(screen,(255,0,0),(selected.x+5+120,selected.y+45),35)
                 screen.blit(self.info_text.text,self.info_text.position)
                 screen.blit(self.plus1_text.text,self.plus1_text.position)
                 screen.blit(self.minus1_text.text,self.minus1_text.position)
             if selected_large != None:
-                screen.blit(selected_large,(window_dim[0]/2-card_dim[0]*1.5,100))
+                if cards_sidebar:
+                    screen.blit(selected_large,(10,100))
+                else:
+                    screen.blit(selected_large,(window_dim[0]/2-card_dim[0]*1.5,100))
             screen.blit(colour_wheel,(colour_wheel_rect.x,colour_wheel_rect.y))
             if editing_deck_title == True and tm.time()%1>0.5:
                 draw.rect(screen,luminance(self.colour),Rect(self.text.get_size()[0]/2+window_dim[0]/2,20,5,70))
 
-    def set_renders(self,card_rect:Rect):
+    def set_renders(self,card_rect:Rect|None):
         if card_rect == None:
             self.info_text=None
             self.plus1_text=None
             self.minus1_text=None
         else:
-            self.info_text=ClickableText(mjgs,"Info",(255,255,255),(card_rect.x+cut_dim[0]+50,card_rect.y+cut_dim[1]/2+20))
-            self.plus1_text=ClickableText(mjgs,"+1",(255,255,255),(selected.x+cut_dim[0]+5+22,selected.y+25))
-            self.minus1_text=ClickableText(mjgs,"-1",(255,255,255),(selected.x+cut_dim[0]+5+102,selected.y+25))
+            self.info_text=ClickableText(mjgs,"Info",(255,255,255),(card_rect.x+45,card_rect.y+cut_dim[1]/2+20))
+            self.plus1_text=ClickableText(mjgs,"+1",(255,255,255),(selected.x+5+17,selected.y+25))
+            self.minus1_text=ClickableText(mjgs,"-1",(255,255,255),(selected.x+5+97,selected.y+25))
 
     def set_rects(self):
         self.outer_rect=Rect(0,100+(128*self.number),window_dim[0],128) #these two hold the position of the deck in the preset screen
@@ -537,6 +564,7 @@ class DeckPreset(): #this gets confusing fast so I'll be leaving some comments
     def deck_change_clicks(self,pos:Coord) -> bool:
         global selected_large
         temp=False
+        temp2=False
         if self.info_text.textrect.collidepoint(pos):
             if selected in self.mob_rects:
                 selected_large=self.mob_infos[self.mob_rects.index(selected)]
@@ -545,10 +573,10 @@ class DeckPreset(): #this gets confusing fast so I'll be leaving some comments
                 selected_large=self.item_infos[self.item_rects.index(selected)]
                 temp=True
         elif self.plus1_text.textrect.collidepoint(pos):
-            if selected in self.mob_rects:
+            if selected in self.mob_rects and sum(list(self.original_mobs.values())) < 8:
                 self.original_mobs[list(self.original_mobs.keys())[self.mob_rects.index(selected)]]+=1
                 temp=True
-            elif selected in self.item_rects:
+            elif selected in self.item_rects and sum(list(self.original_items.values())) < 10:
                 self.original_items[list(self.original_items.keys())[self.item_rects.index(selected)]]+=1
                 temp=True
         elif self.minus1_text.textrect.collidepoint(pos):
@@ -556,17 +584,27 @@ class DeckPreset(): #this gets confusing fast so I'll be leaving some comments
                 self.original_mobs[list(self.original_mobs.keys())[self.mob_rects.index(selected)]]-=1
                 if self.original_mobs[list(self.original_mobs.keys())[self.mob_rects.index(selected)]] == 0:
                     self.original_mobs.pop(list(self.original_mobs.keys())[self.mob_rects.index(selected)])
+                    temp2=True
                 temp=True
             elif selected in self.item_rects:
                 self.original_items[list(self.original_items.keys())[self.item_rects.index(selected)]]-=1
                 if self.original_items[list(self.original_items.keys())[self.item_rects.index(selected)]] == 0:
                     self.original_items.pop(list(self.original_items.keys())[self.item_rects.index(selected)])
+                    temp2=True
                 temp=True
         if temp:
+            self.unpack(self.original_mobs,self.original_items,"whitelist",["items","mobs"])
+        if temp2:
             self.unpack(self.original_mobs,self.original_items)
         return temp
     
-    def deck_delete_clicks(self,pos):
+    def deck_other_clicks(self,pos:Coord):
+        if items_left[1].collidepoint(pos) and self.item_offset > 0:
+            self.item_offset -= 1
+        elif items_right[1].collidepoint(pos) and len(self.item_rects) > 8 and not 8+self.item_offset == len(self.item_rects):
+            self.item_offset += 1
+    
+    def deck_delete_clicks(self,pos:Coord):
         global deleting_deck
         if deleting_deck == True:
             temp=False
@@ -575,8 +613,7 @@ class DeckPreset(): #this gets confusing fast so I'll be leaving some comments
                     if deck.number > self.number:
                         deck.number-=1
                         deck.set_rects()
-                infojson.pop(self.name)
-                deck_presets.pop(deck_presets.index(self))
+                deck_presets.pop(self.number)
                 deleting_deck=False
                 temp=True
             return temp
@@ -591,27 +628,47 @@ class DeckPreset(): #this gets confusing fast so I'll be leaving some comments
             self.name += e.unicode
         self.text=large_font.render(self.name,True,luminance(self.colour))
     
-    def unpack(self,mobs:dict[Card,int],items:dict[Card,int]):
-        self.mobs:dict[str,int]={eval(x):mobs[x] for x in list(mobs.keys())} #strings are those that represent the card info that can be evaled into card objects, ints are amounts
-        self.items:dict[str,int]={eval(x):items[x] for x in list(items.keys())}
-        self.mob_rects=[] #mob hitboxes
-        for card in self.mobs:
-            self.mob_rects.append(Rect(((cut_dim[0]+20)*list(self.mobs.keys()).index(card))%(window_dim[0]-40)+20,((cut_dim[0]+100)*list(self.mobs.keys()).index(card))//window_dim[1]+155,cut_dim[0],cut_dim[1])) # don't question the math unless it doesn't work. In that case, well, time to use some elbow grease, eh?
-        self.item_rects=[] #item hitboxes
-        for card in self.items:
-            self.item_rects.append(Rect(((cut_dim[0]+20)*list(self.items.keys()).index(card))%(window_dim[0]-40)+20,((cut_dim[0]+100)*list(self.items.keys()).index(card))//window_dim[1]+255+cut_dim[1],cut_dim[0],cut_dim[1]))
-        self.mob_tiles=[] #mob images
-        for card in self.mobs:
-            self.mob_tiles.append(transform.scale(eval(card).cut_sprite,cut_dim))
-        self.item_tiles=[] #item images
-        for card in self.items:
-            self.item_tiles.append(transform.scale(eval(card).cut_sprite,cut_dim))
-        self.mob_infos=[] #mob large images, displayed when selected
-        for card in self.mobs:
-            self.mob_infos.append(transform.scale(image.load(eval(card).original_sprite).convert(),(card_dim[0]*3,card_dim[1]*3)))
-        self.item_infos=[] #item large images, displayed when selected
-        for card in self.items:
-            self.item_infos.append(transform.scale(image.load(eval(card).original_sprite).convert(),(card_dim[0]*3,card_dim[1]*3)))
+    def unpack(self,mobs:dict[Card,int],items:dict[Card,int],targettype:Literal["blacklist"]|Literal["whitelist"]="all",targets:list=[]):
+        target_list=["mobs","items","mob_rects","item_rects","mob_tiles","item_tiles","mob_infos","item_infos","pinks"]
+        if targettype == "blacklist":
+            target_list=[var for var in target_list if var not in targets]
+        elif targettype == "whitelist":
+            target_list=[var for var in target_list if var in targets]
+        if "mobs" in target_list:
+            self.mobs:dict[str,int]={eval(x):mobs[x] for x in list(mobs.keys())} #strings are those that represent the card info that can be evaled into card objects, ints are amounts
+        if "items" in target_list:
+            self.items:dict[str,int]={eval(x):items[x] for x in list(items.keys())}
+        if "mob_rects" in target_list:
+            self.mob_rects:list[Rect]=[] #mob hitboxes
+            for card in self.mobs:
+                self.mob_rects.append(Rect(((cut_dim[0]+20)*list(self.mobs.keys()).index(card))%(window_dim[0]-40)+20,((cut_dim[0]+100)*list(self.mobs.keys()).index(card))//window_dim[1]+155,cut_dim[0],cut_dim[1])) # don't question the math unless it doesn't work. In that case, well, time to use some elbow grease, eh?
+        if "item_rects" in target_list:
+            self.item_rects:list[Rect]=[] #item hitboxes
+            for card in self.items:
+                self.item_rects.append(Rect(((cut_dim[0]+20)*list(self.items.keys()).index(card))+20,((cut_dim[0]+100)*list(self.items.keys()).index(card))//window_dim[1]+255+cut_dim[1],cut_dim[0],cut_dim[1]))
+        if "mob_tiles" in target_list:
+            self.mob_tiles:list[Surface]=[] #mob images
+            for card in self.mobs:
+                self.mob_tiles.append(transform.scale(eval(card).cut_sprite,cut_dim))
+        if "item_tiles" in target_list:
+            self.item_tiles:list[Surface]=[] #item images
+            for card in self.items:
+                self.item_tiles.append(transform.scale(eval(card).cut_sprite,cut_dim))
+        if "mob_infos" in target_list:
+            self.mob_infos:list[Surface]=[] #mob large images, displayed when selected
+            for card in self.mobs:
+                self.mob_infos.append(transform.scale(image.load(eval(card).original_sprite).convert(),(card_dim[0]*3,card_dim[1]*3)))
+        if "item_infos" in target_list:
+            self.item_infos:list[Surface]=[] #item large images, displayed when selected
+            for card in self.items:
+                self.item_infos.append(transform.scale(image.load(eval(card).original_sprite).convert(),(card_dim[0]*3,card_dim[1]*3)))
+        if "pinks" in target_list:
+            self.pink_mob=False
+            self.pink_item=False
+            if len([mob for mob in list(self.mobs.keys()) if eval(mob).border == "pink"]) != 0:
+                self.pink_mob=True
+            if len([item for item in list(self.items.keys()) if eval(item).border == "pink"]) != 0:
+                self.pink_item=True
 
 def excepthook(type, value, traceback):
     print(f"Error: {type.__name__}\nReason: {value}\nTraceback :\n{str(t.format_tb(traceback))}")
@@ -675,7 +732,7 @@ def draw_card(player:Player,amount:int=1,override=None) -> list[Card]|Card:
     else:
         return card_list
 
-def denest(container:dict) -> list:
+def denest(container:dict|list) -> list:
     result=[]
     if type(container) == dict:
         keys=list(container.keys())
@@ -1152,6 +1209,7 @@ soul=transform.scale(image.load(r"Assets\soul.png"),token_dim).convert()
 heart=transform.scale(image.load(r"Assets\hearts_1.png"),(60,60)).convert()
 ORANGE = (255,180,0)
 SOUL_COLOUR=(255,255,255)
+M_BLUE=(50,190,220)
 starting_cards=5
 drawing_cards=2
 cardback=r"Assets\mob_back.png"
@@ -1181,18 +1239,32 @@ cards_sidebar_up_rect=Rect((cards_sidebar_rect.x-window_dim[0]/2,cards_sidebar_r
 cards_sidebar_down=transform.rotate(cards_sidebar_button,90)
 cards_sidebar_down_rect=Rect((cards_sidebar_rect.x-window_dim[0]/2,cards_sidebar_rect.y+230),(70,70))
 cards_sidebar_page=0
-all_cut=[]
-temp=[]
+items_left=(transform.scale(cards_sidebar_button,(40,40)),Rect(130,380,40,40))
+items_right=(transform.scale(transform.rotate(cards_sidebar_button,180),(40,40)),Rect(200,380,40,40))
+all_cut:list[list[Surface]]=[]
+all_cut_fulls:list[list[Surface]]=[]
+all_cut_names:list[list[str]]=[]
+temp=[[],[],[]]
 temp_n=0
-cuts=[file for file in os.scandir("Cut Sprites")]
-for file in cuts:
-    temp.append(transform.scale(image.load(f"Cut Sprites\\{file.name}"),cut_dim))
+cuts:list[os.DirEntry]=[file for file in os.scandir("Cut Sprites")]
+cut_fulls:list[os.DirEntry]=[file for file in os.scandir("Sprites")]
+cut_fulls_names:list[str]=[file.name.split(".")[0] for file in cut_fulls]
+for i in range(len(cuts)):
+    temp[0].append(transform.scale(image.load(f"Cut Sprites\\{cuts[i].name}"),cut_dim).convert())
+    if cuts[i].name.split(".")[0] in cut_fulls_names:
+        temp[1].append(transform.scale(image.load(f"Sprites\\{cut_fulls[i].name}"),(card_dim[0]*3,card_dim[1]*3)).convert())
+    else:
+        temp[1].append(transform.scale(image.load(f"Cut Sprites\\{cuts[i].name}"),(card_dim[0]*3,card_dim[1]*3)).convert())
+    temp[2].append("_".join(cuts[i].name.split(".")[0].split(" ")).lower())
     temp_n+=1
-    if temp_n == 9 or file == cuts[-1]:
+    if temp_n == 9 or cuts[i] == cuts[-1]:
         temp_n=0
-        all_cut.append(temp)
-        temp=[]
-all_cut_rects=[]
+        all_cut.append(temp[0])
+        all_cut_fulls.append(temp[1])
+        all_cut_names.append(temp[2])
+        temp=[[],[],[]]
+temp=[]
+all_cut_rects:list[list[Rect]]=[]
 for page in all_cut:
     for i in range(len(page)):
         temp.append(Rect(((cut_dim[0]+20)*i)%(window_dim[0]/2)+window_dim[0]/2+20,(cut_dim[1]+40)*(i//3)+130,cut_dim[0],cut_dim[1]))
@@ -1217,7 +1289,7 @@ markers={"retry":False, "deck built":False, "do not connect":True, "start of tur
 selected=None #card displayed on the side
 selected_move=None #move that has been selected
 attack_progressing=False #is it the attack target choosing stage
-move_hovering_over=None #tuple of Rect of attack being hovered over and attack function itself, used for click detection
+move_hovering_over:tuple[Rect,Callable]|tuple[Rect,Surface,Rect,int,int]=None #tuple of Rect of attack being hovered over and attack function itself, used for click detection
 targets=[]
 until_end=0
 ability_selected=False
@@ -1268,6 +1340,7 @@ witch=r'Mob("Witch",3,4,[Ability(1,witch_poison,"player2 field"),Ability(1,witch
 zombie=r'Mob("Zombie",2,4,[],[bite],{"on hurt":undead},{},"undead","cavern","blue",r"Sprites\Zombie.png",(0,0),r"Cut Sprites\Zombie.png",[(987,512,1323,579)])'
 #Mob()
 
+tiles=[{all_cut_names[i][j]:Tile(all_cut_names[i][j],all_cut_fulls[i][j],all_cut[i][j],type(eval(eval(all_cut_names[i][j]))).__name__,eval(eval(all_cut_names[i][j])).border,all_cut_rects[i][j]) for j in range(len(all_cut[i]))} for i in range(len(all_cut))]
 decklist:dict[Card,int]={zombie:30,sword:10}
 deck_presets:list[DeckPreset]=[]
 unpack()
@@ -1299,6 +1372,7 @@ delete_deck_text=ClickableText(mjgs,"Delete deck",(200,0,0),(100,750))
 deck_inspects_to_presets_text=ClickableText(mjgs,"Back",(255,0,0),(100,750))
 deck_mobs_text=mjgs.render("Mobs:",True,(0,0,0))
 deck_items_text=mjgs.render("Items:",True,(0,0,0))
+select_deck_text=ClickableText(mjgs,"Use deck",(0,255,0),(window_dim[0]-mjgs.size("Use deck")[0]-100,750))
 while running:
     screen.blit(background,(0,0))
     if markers["monkey"] != 0:
@@ -1315,7 +1389,7 @@ while running:
             infofile.close()
             running=False
         elif e.type == MOUSEBUTTONUP and state not in game_overs and not markers["freeze"]:
-            pos=mouse.get_pos()
+            pos:Coord=mouse.get_pos()
             if state == "menu":
                 if host_text.textrect.collidepoint(pos):
                     if markers["do not connect"]:
@@ -1351,6 +1425,14 @@ while running:
                         if True not in temp:
                             deleting_deck=False
                             temp2=False
+                    elif create_deck_text.textrect.collidepoint(pos):
+                        copies=len([deck.name for deck in deck_presets if deck.name == "New Deck"])
+                        if copies == 0:
+                            name="New Deck"
+                        else:
+                            name=f"New Deck({copies})"
+                        deck_presets.append(DeckPreset(name,max([deck.number for deck in deck_presets])+1,(255,255,255),{},{}))
+                        selected_deck=deck_presets[-1]
                     else:
                         for preset in deck_presets:
                             if preset.outer_rect.collidepoint(pos):
@@ -1360,6 +1442,7 @@ while running:
                     selected_deck=None
                     selected_large=None
                 else:
+                    selected_deck.deck_other_clicks(pos)
                     temp=False
                     if selected_deck.title_bg_rect.collidepoint(pos):
                         editing_deck_title=True
@@ -1397,6 +1480,17 @@ while running:
                         cards_sidebar_page-=1
                     if cards_sidebar_down_rect.collidepoint(pos) and cards_sidebar_page != len(all_cut)-1:
                         cards_sidebar_page+=1
+                    if move_hovering_over != None:
+                        if move_hovering_over[0].collidepoint(pos):
+                            selected_large=move_hovering_over[1]
+                        elif move_hovering_over[2].collidepoint(pos) and all_cut_names[move_hovering_over[3]][move_hovering_over[4]] not in list(selected_deck.original_mobs.keys())+list(selected_deck.original_items.keys()):
+                            if eval(all_cut_names[move_hovering_over[3]][move_hovering_over[4]])[0] == "M":
+                                selected_deck.original_mobs[all_cut_names[move_hovering_over[3]][move_hovering_over[4]]]=1
+                            else:
+                                selected_deck.original_items[all_cut_names[move_hovering_over[3]][move_hovering_over[4]]]=1
+                            selected_deck.unpack(selected_deck.original_mobs,selected_deck.original_items)
+                        else:
+                            move_hovering_over=None
 
             if state == "game" and not attack_progressing:
                 for card in player1.field:
@@ -1652,27 +1746,54 @@ while running:
                     preset.display()
         else:
             screen.blit(deck_inspects_to_presets_text.text,deck_inspects_to_presets_text.position)
+            screen.blit(select_deck_text.text,select_deck_text.position)
             selected_deck.display() #actually displaying the deck is in DeckPreset.display()
-            draw.circle(screen,(50,190,220),(cards_sidebar_rect.x+35,cards_sidebar_rect.y+35),40)
+            draw.circle(screen,M_BLUE,(cards_sidebar_rect.x+35,cards_sidebar_rect.y+35),40)
             screen.blit(cards_sidebar_button,(cards_sidebar_rect.x,cards_sidebar_rect.y))
             if cards_sidebar:
                 draw.rect(screen,(90,180,30),Rect(window_dim[0]/2,115,window_dim[0]/2-20,window_dim[1]-225))
                 if cards_sidebar_page == 0:
                     draw.circle(screen,(128,128,128),(cards_sidebar_up_rect.x+35,cards_sidebar_up_rect.y+35),40)
                 else:
-                    draw.circle(screen,(50,190,220),(cards_sidebar_up_rect.x+35,cards_sidebar_up_rect.y+35),40)
+                    draw.circle(screen,M_BLUE,(cards_sidebar_up_rect.x+35,cards_sidebar_up_rect.y+35),40)
                 screen.blit(cards_sidebar_up,(cards_sidebar_up_rect.x,cards_sidebar_up_rect.y))
                 if cards_sidebar_page == len(all_cut)-1:
                     draw.circle(screen,(128,128,128),(cards_sidebar_down_rect.x+35,cards_sidebar_down_rect.y+35),40)
                 else:
-                    draw.circle(screen,(50,190,220),(cards_sidebar_down_rect.x+35,cards_sidebar_down_rect.y+35),40)
+                    draw.circle(screen,M_BLUE,(cards_sidebar_down_rect.x+35,cards_sidebar_down_rect.y+35),40)
                 screen.blit(cards_sidebar_down,(cards_sidebar_down_rect.x,cards_sidebar_down_rect.y))
                 screen.blit(mjgs.render(f"{cards_sidebar_page+1}/{len(all_cut)}",True,(0,0,0)),(cards_sidebar_down_rect.x,cards_sidebar_down_rect.y-mjgs.get_height()/2-18))
+                temp=False
                 for i in range(len(all_cut[cards_sidebar_page])):
                     screen.blit(all_cut[cards_sidebar_page][i],all_cut_rects[cards_sidebar_page][i])
                     if all_cut_rects[cards_sidebar_page][i].collidepoint(mouse.get_pos()):
-                        draw.rect(screen,(15,180,220),Rect(all_cut_rects[cards_sidebar_page][i].x+15,all_cut_rects[cards_sidebar_page][i].y+cut_dim[1]/2+5,cut_dim[0]-20,70))
-                        screen.blit(mjgs.render("Info",True,(0,0,0)),(all_cut_rects[cards_sidebar_page][i].x+10,all_cut_rects[cards_sidebar_page][i].y+cut_dim[1]/2+5))
+                        inforect=Rect(all_cut_rects[cards_sidebar_page][i].x+10,all_cut_rects[cards_sidebar_page][i].y+cut_dim[1]/2+5,cut_dim[0]-20,70)
+                        addrect=Rect(all_cut_rects[cards_sidebar_page][i].x+10,all_cut_rects[cards_sidebar_page][i].y+5,cut_dim[0]-20,70)
+                        draw.rect(screen,(15,180,220),inforect)
+                        if all_cut_names[cards_sidebar_page][i] not in list(selected_deck.original_mobs.keys())+list(selected_deck.original_items.keys()):
+                            draw.rect(screen,(0,200,0),addrect)
+                        else:
+                            draw.rect(screen,(128,128,128),addrect)
+                        screen.blit(mjgs.render("Info",True,(255,255,255)),(all_cut_rects[cards_sidebar_page][i].x+45,all_cut_rects[cards_sidebar_page][i].y+cut_dim[1]/2+20))
+                        screen.blit(mjgs.render("Add",True,(255,255,255)),(all_cut_rects[cards_sidebar_page][i].x+50,all_cut_rects[cards_sidebar_page][i].y+20))
+                        move_hovering_over=(inforect,all_cut_fulls[cards_sidebar_page][i],addrect,cards_sidebar_page,i)
+                        temp=True
+                if not temp:
+                    move_hovering_over=None
+            temp=False
+            for mob in selected_deck.mob_rects:
+                if mob.collidepoint(mouse.get_pos()):
+                    selected=mob
+                    selected_deck.set_renders(mob)
+                    temp=True
+            for item in selected_deck.item_rects:
+                if item.collidepoint(mouse.get_pos()) and selected_deck.item_rects.index(item) >= selected_deck.item_offset and selected_deck.item_rects.index(item) <= selected_deck.item_offset+7:
+                    selected=item
+                    selected_deck.set_renders(item)
+                    temp=True
+            if not temp:
+                selected_deck.set_renders(None)
+                selected=None
 
     elif state == "pregame":
         screen.blit(pregame_text,(window_dim[0]/2-mjgs.size("Loading...")[0]/2,window_dim[1]/2))
@@ -1857,13 +1978,13 @@ while running:
     10. Item application moving
     11. Cards do a little jump when their passives activate
     12. Decks: 8 mobs, 10 items, items are drawn, all mobs are already in hand
-    13. Change DeckPreset.unpack() to allow re-generating specific variables (to prevent FPS drop from continously calling it from DeckPreset.deck_change_clicks())
-    14. Implement setting colour for decks
-    15. CURRENT: Continue from line 1675
+    13. Implement setting colour for decks
+    14. Change changing card number in a deck to be hover instead of click (neat and solves the pronlem of 8 unique mobs, last click menu square goes off-screen)
 
     Bugs:
     1. FPS drop when game end screen comes into full opacity
     2. Colour wheel png is not actually transparent
+    3. Cards sidebar is misaligned
 
     Conditions:
     "end of turn": Called at the end of the attack phase
