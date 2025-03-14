@@ -463,7 +463,7 @@ class Ability():
             tempt=[mob for mob in player1.field if (mob != None and mob.proxy == None and mob.proxy_for == None and mob != selected)]
         return tempt
 
-class Tile():
+class Tile(): #a simplified container for card data
     def __init__(self,name:str,full_sprite:Surface,cut_sprite:Surface,kind:Literal["Mob"]|Literal["Item"],border:Literal["blue"]|Literal["pink"],position:Coord):
         self.name=name
         self.full_sprite=full_sprite
@@ -472,6 +472,30 @@ class Tile():
         self.border=border
         self.position=position
         self.rect=cut_sprite.get_rect(x=position[0],y=position[1])
+
+    def display(self):
+        screen.blit(self.cut_sprite,(self.rect.x,self.rect.y))
+
+    def nearcopy(self,**kwargs) -> Tile:
+        new_name=self.name
+        if "name" in kwargs:
+            new_name=kwargs["name"]
+        new_full=self.full_sprite
+        if "full_sprite" in kwargs:
+            new_full=kwargs["full_sprite"]
+        new_cut=self.cut_sprite
+        if "cut_sprite" in kwargs:
+            new_cut=kwargs["cut_sprite"]
+        new_kind=self.kind
+        if "kind" in kwargs:
+            new_kind=kwargs["kind"]
+        new_border=self.border
+        if "border" in kwargs:
+            new_border=kwargs["border"]
+        new_pos=self.position
+        if "position" in kwargs:
+            new_pos=kwargs["position"]
+        return Tile(new_name,new_full,new_cut,new_kind,new_border,new_pos)
 
 class DeckPreset(): #this gets confusing fast so I'll be leaving some comments
     def __init__(self,name:str,number:int,colour:tuple[int,int,int],mobs:dict[Card,int],items:dict[Card,int]):
@@ -1340,7 +1364,10 @@ witch=r'Mob("Witch",3,4,[Ability(1,witch_poison,"player2 field"),Ability(1,witch
 zombie=r'Mob("Zombie",2,4,[],[bite],{"on hurt":undead},{},"undead","cavern","blue",r"Sprites\Zombie.png",(0,0),r"Cut Sprites\Zombie.png",[(987,512,1323,579)])'
 #Mob()
 
-tiles=[{all_cut_names[i][j]:Tile(all_cut_names[i][j],all_cut_fulls[i][j],all_cut[i][j],type(eval(eval(all_cut_names[i][j]))).__name__,eval(eval(all_cut_names[i][j])).border,all_cut_rects[i][j]) for j in range(len(all_cut[i]))} for i in range(len(all_cut))]
+tiles:list[dict[str,Tile]]=[{all_cut_names[i][j]:Tile(all_cut_names[i][j],all_cut_fulls[i][j],all_cut[i][j],type(eval(eval(all_cut_names[i][j]))).__name__,eval(eval(all_cut_names[i][j])).border,all_cut_rects[i][j]) for j in range(len(all_cut[i]))} for i in range(len(all_cut))]
+d_tiles:dict[str,Tile]={}
+for sub in tiles:
+    d_tiles.update(sub)
 decklist:dict[Card,int]={zombie:30,sword:10}
 deck_presets:list[DeckPreset]=[]
 unpack()
@@ -1979,7 +2006,7 @@ while running:
     11. Cards do a little jump when their passives activate
     12. Decks: 8 mobs, 10 items, items are drawn, all mobs are already in hand
     13. Implement setting colour for decks
-    14. Change changing card number in a deck to be hover instead of click (neat and solves the pronlem of 8 unique mobs, last click menu square goes off-screen)
+    15. TILES!!! TILES!!!!!! TIIIIIILES!!!!!! I DON'T EVEN KNOW WHERE TO START!!!
 
     Bugs:
     1. FPS drop when game end screen comes into full opacity
