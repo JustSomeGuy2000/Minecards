@@ -506,7 +506,7 @@ class DeckPreset(): #this gets confusing fast so I'll be leaving some comments
         self.original_items:dict[str,int]=items
         self.set_rects()
         self.title_bg_rect=Rect(10,10,window_dim[0]-20,88)
-        self.text=large_font.render(name,True,luminance(colour))
+        self.text=large_font.render(name,True,contrast(colour))
         self.unpack(mobs,items)
         self.info_text=None
         self.plus1_text=None
@@ -569,7 +569,7 @@ class DeckPreset(): #this gets confusing fast so I'll be leaving some comments
                     screen.blit(selected_large,(window_dim[0]/2-card_dim[0]*1.5,100))
             screen.blit(colour_wheel,(colour_wheel_rect.x,colour_wheel_rect.y))
             if editing_deck_title == True and tm.time()%1>0.5:
-                draw.rect(screen,luminance(self.colour),Rect(self.text.get_size()[0]/2+window_dim[0]/2,20,5,70))
+                draw.rect(screen,contrast(self.colour),Rect(self.text.get_size()[0]/2+window_dim[0]/2,20,5,70))
 
     def set_renders(self,card_rect:Rect|None):
         if card_rect == None:
@@ -624,10 +624,15 @@ class DeckPreset(): #this gets confusing fast so I'll be leaving some comments
         return temp
     
     def deck_other_clicks(self,pos:Coord):
+        global chosen_deck
+        global decklist_p1
         if items_left[1].collidepoint(pos) and self.item_offset > 0:
             self.item_offset -= 1
         elif items_right[1].collidepoint(pos) and sum(list(self.items.values())) > 8 and not 8+self.item_offset == sum(list(self.items.values())):
             self.item_offset += 1
+        elif select_deck_text.textrect.collidepoint(pos):
+            chosen_deck=self
+            decklist_p1={"mobs":{eval(mob):self.original_mobs[mob] for mob in self.original_mobs},"items":{eval(item):self.original_items[item] for item in self.original_items}}
     
     def deck_delete_clicks(self,pos:Coord):
         global deleting_deck
@@ -649,9 +654,9 @@ class DeckPreset(): #this gets confusing fast so I'll be leaving some comments
             self.name = self.name[:-1]
         elif e.key == K_RETURN or e.key == K_ESCAPE:
             editing_deck_title=False
-        else:
+        elif e.key != K_LESS and e.key != K_GREATER:
             self.name += e.unicode
-        self.text=large_font.render(self.name,True,luminance(self.colour))
+        self.text=large_font.render(self.name,True,contrast(self.colour))
     
     def unpack(self,mobs:dict[str,int],items:dict[str,int],targettype:Literal["blacklist"]|Literal["whitelist"]="all",targets:list=[]):
         target_list=["mobs","items","mob_rects","item_rects","mob_tiles","item_tiles","mob_infos","item_infos","pinks"]
@@ -756,7 +761,7 @@ def denest(container:dict|list) -> list:
 def len_items(items:dict) -> int:
     return len(denest(items))
 
-def luminance(colour:tuple[int,int,int]):
+def contrast(colour:tuple[int,int,int]):
     brightness=0.299*colour[0] + 0.587*colour[1] + 0.114*colour[2]
     if brightness <= 0.5:
         return (255,255,255)
@@ -768,7 +773,8 @@ def unpack():
     if infojson != {}:
         deck_presets=[]
         for deck_name in infojson:
-            deck_presets.append(DeckPreset(deck_name,infojson[deck_name]["number"],infojson[deck_name]["colour"],infojson[deck_name]["mobs"],infojson[deck_name]["items"]))
+            if deck_name[0] != "<":
+                deck_presets.append(DeckPreset(deck_name,infojson[deck_name]["number"],infojson[deck_name]["colour"],infojson[deck_name]["mobs"],infojson[deck_name]["items"]))
 
 def atk_check(func) -> bool: #decorator that applies to all attacks, first decorator layer
     def atk_wrapper(**kwargs):
@@ -1270,7 +1276,7 @@ temp=[]
 all_cut_rects:list[list[Rect]]=[]
 for page in all_cut:
     for i in range(len(page)):
-        temp.append(Rect(((cut_dim[0]+20)*i)%(window_dim[0]/2)+window_dim[0]/2+20,(cut_dim[1]+40)*(i//3)+130,cut_dim[0],cut_dim[1]))
+        temp.append(Rect((800+(i%3)*(60+cut_dim[0]),145+(i//3)*(20+cut_dim[1])),cut_dim))
     all_cut_rects.append(temp)
     temp=[]
 deck_cards_pos=[(20+cut_dim[0])*i+20 for i in range(10)]
@@ -1297,13 +1303,14 @@ move_hovering_over:tuple[Rect,Callable]|tuple[Rect,Surface,Rect,int,int]=None #t
 targets=[]
 until_end=0
 ability_selected=False
-infojson=json.loads(b.unhexlify(infofile.read()))
+infojson:dict[str,dict]=json.loads(b.unhexlify(infofile.read()))
 selected_deck:None|DeckPreset=None
 selected_large=None
 deleting_deck=False
 editing_deck_title=False
 choosing_colour=False
 cards_sidebar=False
+coord_tooltip=False
 
 #define cards here
 #Note: cards for deck use are defined by deckbuilder(), which takes these strings and eval()s them into objects
@@ -1351,6 +1358,12 @@ for sub in tiles:
 decklist:dict[Card,int]={zombie:30,sword:10}
 deck_presets:list[DeckPreset]=[]
 unpack()
+chosen_deck_name=infojson.pop("<chosen>")
+for deck in deck_presets:
+    if deck.name == chosen_deck_name:
+        chosen_deck=deck
+decklist_p1={"mobs":{eval(mob):chosen_deck.original_mobs[mob] for mob in chosen_deck.original_mobs},"items":{eval(item):chosen_deck.original_items[item] for item in chosen_deck.original_items}}
+decklist_p2={"mobs":{zombie:8},"items":{sword:10}}
 playername="J1"
 player1=Player(playername,1,(fields_anchor[0],y_rails[1]+cut_dim[1]+card_spacing_y),[(x_rails[0],y_rails[1]),(x_rails[1],y_rails[1]),(x_rails[2],y_rails[1])])
 player2:Player=''
@@ -1380,6 +1393,7 @@ deck_inspects_to_presets_text=ClickableText(mjgs,"Back",(255,0,0),(100,750))
 deck_mobs_text=mjgs.render("Mobs:",True,(0,0,0))
 deck_items_text=mjgs.render("Items:",True,(0,0,0))
 select_deck_text=ClickableText(mjgs,"Use deck",(0,255,0),(window_dim[0]-mjgs.size("Use deck")[0]-100,750))
+deck_selected_text=mjgs.render("Deck selected",True,(180,180,180))
 while running:
     screen.blit(background,(0,0))
     if markers["monkey"] != 0:
@@ -1392,7 +1406,9 @@ while running:
         if e.type == QUIT:
             infofile.close()
             infofile=open(r"Assets\info.bin","wb")
-            infofile.write(b.hexlify(json.dumps({x[0]:x[1] for x in [preset.to_dict() for preset in deck_presets]}).encode()))
+            final_json={x[0]:x[1] for x in [preset.to_dict() for preset in deck_presets]}
+            final_json.update({"<chosen>":chosen_deck.name})
+            infofile.write(b.hexlify(json.dumps(final_json).encode()))
             infofile.close()
             running=False
         elif e.type == MOUSEBUTTONUP and state not in game_overs and not markers["freeze"]:
@@ -1701,6 +1717,7 @@ while running:
         elif e.type==KEYDOWN:
             if e.key==K_p:
                 print(str(mouse.get_pos()))
+                coord_tooltip= not coord_tooltip
             if connect_state == "connecting":
                 if e.key == K_BACKSPACE:
                     HOST = HOST[:-1]
@@ -1753,7 +1770,10 @@ while running:
                     preset.display()
         else:
             screen.blit(deck_inspects_to_presets_text.text,deck_inspects_to_presets_text.position)
-            screen.blit(select_deck_text.text,select_deck_text.position)
+            if chosen_deck != selected_deck:
+                screen.blit(select_deck_text.text,select_deck_text.position)
+            else:
+                screen.blit(deck_selected_text,(window_dim[0]-mjgs.size("Deck selected")[0]-100,750))
             selected_deck.display() #actually displaying the deck is in DeckPreset.display()
             draw.circle(screen,M_BLUE,(cards_sidebar_rect.x+35,cards_sidebar_rect.y+35),40)
             screen.blit(cards_sidebar_button,(cards_sidebar_rect.x,cards_sidebar_rect.y))
@@ -1966,6 +1986,10 @@ while running:
 
     fps_text=mjgs.render(f"FPS:{str(round(clock.get_fps(),2))}",True,(255,255,255))
     screen.blit(fps_text,(0,fps_text.get_height()))
+    cursor_coord=small_font.render("-"+str(mouse.get_pos()),True,(0,0,0))
+    if coord_tooltip:
+        draw.rect(screen,(255,255,255),Rect((mouse.get_pos()),(cursor_coord.get_width(),20)))
+        screen.blit((cursor_coord),(mouse.get_pos()))
     display.update()
     clock.tick(FPS)
 
@@ -1986,7 +2010,7 @@ while running:
     11. Cards do a little jump when their passives activate
     12. Decks: 8 mobs, 10 items, items are drawn, all mobs are already in hand
     13. Implement setting colour for decks
-    15. TILES!!! TILES!!!!!! TIIIIIILES!!!!!! I DON'T EVEN KNOW WHERE TO START!!!
+    14. Make sure there can only be one pink mob and item
 
     Bugs:
     1. FPS drop when game end screen comes into full opacity
