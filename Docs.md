@@ -74,7 +74,7 @@ Abilities return one or two values: [0]:bool and {[1]:str}.
     [1]="break", used by wool_guard(), stops the attack routine from cycling through the rest of the targets in the target list. I can't remember why this is needed but it's best not to touch it.
 
 ## Items
-Item effects take five or six arguments: origin, target, player, item, only_targeting and {original/damage}.
+Item effects take six arguments: origin, target, player, item, only_targeting and original/damage.
 Origin is the mob that is attacking.
 Target is the target mob.
 Player is the player the attacking mob belongs to.
@@ -82,7 +82,7 @@ Item is the item calling the effect.
 Only_targeting is a boolean value specifying if only the target list should be returned.
     This should not be called externally. It is handled by itm_check()
 Original/damage is the damage being dealt.
-    Damage is used in "on hurt" items, while original is used in "on attack" items. Don't ask me why.
+    Damage is used in "on hurt" items, while original is used in "on attack" items. Don't ask me why. Its probably going to cause trouble in the future.
 
 Items return no values or one value: {[0]:list} and {[1]:list[bool,int,list]}.
 [0] is a list of the item's targets.
@@ -92,7 +92,7 @@ Items return no values or one value: {[0]:list} and {[1]:list[bool,int,list]}.
     itm_check() uses this as the new attack value for the current card.
 
 # Certain variables
-## linger_anim
+## linger_anims
 A list of tuples. Each tuple cotains:
 [0]\:Surface: The surface to blit
 [1]\:Coord: The starting position
@@ -101,5 +101,3 @@ A list of tuples. Each tuple cotains:
 [4]\:str: The equation used to show the animation.
     For now, takes values of "inverse up" or "inverse down", -/+ 1/x
 [5]\:int: The scale of the animation.
-
-#screen.blit(self.move_anim[1],(self.move_anim[2][0],self.move_anim[2][1]-cut_dim[1]-200/(61-self.move_anim[0])))

@@ -142,7 +142,8 @@ class Mob(sprite.Sprite):
             screen.blit(self.current_sprite, (self.rect.x,self.rect.y))
         for item in self.items:
             for subitem in self.items[item]:
-                subitem.internal_coords[0], subitem.internal_coords[1]= (self.rect.x+cut_dim[0]*2/3, self.rect.y+item_dim[1]*denest(self.items).index(subitem))
+                if subitem.times == []:
+                    subitem.internal_coords[0], subitem.internal_coords[1]= (self.rect.x+cut_dim[0]*2/3, self.rect.y+item_dim[1]*denest(self.items).index(subitem))
                 subitem.update()
 
     def switch_sprite(self,final:Literal["front","back","cut"]):
@@ -416,15 +417,18 @@ class Player():
                 self.souls -= target.cost
         elif type(target) == Item:
             if target.condition != "when played":
+                temp=copy.copy([target.rect.x, target.rect.y])
                 self.field[pos-1].add_item(target)
                 target.switch_sprite("cut")
+                target.internal_coords=temp
+                target.startmove([(self.field[pos-1].rect.x+cut_dim[0]*2/3, self.field[pos-1].rect.y+item_dim[1]*denest(self.field[pos-1].items).index(target))],[30])
                 if not ignore_cost:
                     self.souls -= target.cost
             else:
                 if pos_override == None:
-                    target.effect(target=self.field[pos-1], origin=target, player=self)
+                    target.effect(target=self.field[pos-1], origin=target, player=self, item=target)
                 else:
-                    target.effect(target=pos_override, origin=target, player=self)
+                    target.effect(target=pos_override, origin=target, player=self, item=target)
 
     def reset(self):
         self.hand=[]
@@ -647,6 +651,7 @@ class DeckPreset(): #this gets confusing fast so I'll be leaving some comments
     def deck_other_clicks(self,pos:Coord):
         global chosen_deck
         global decklist_p1
+        global menu_deck_selected_text
         if items_left[1].collidepoint(pos) and self.item_offset > 0:
             self.item_offset -= 1
         elif items_right[1].collidepoint(pos) and sum(list(self.items.values())) > 8 and not 8+self.item_offset == sum(list(self.items.values())):
@@ -655,6 +660,7 @@ class DeckPreset(): #this gets confusing fast so I'll be leaving some comments
             if self.usable == True:
                 chosen_deck=self
                 decklist_p1={"mobs":{eval(mob):self.original_mobs[mob] for mob in self.original_mobs},"items":{eval(item):self.original_items[item] for item in self.original_items}}
+                menu_deck_selected_text=mjgs.render(chosen_deck.name,True,contrast(chosen_deck.colour))
     
     def deck_delete_clicks(self,pos:Coord):
         global deleting_deck
@@ -860,7 +866,7 @@ def abl_check(func):  #decorator that applies to all abilities, first decorator 
         else:
             opp=player1
         match=opp.field[kwargs["player"].field.index(kwargs["origin"])]
-        if "Egg Rain" in [item.name for item in list(kwargs["origin"].items.values())] or (match != None and match.name == "Frog"): #egg rain and tongue snare
+        if "Egg Rain" in [item.name for item in list(denest(kwargs["origin"].items))] or (match != None and match.name == "Frog"): #egg rain and tongue snare
             result=None
         else:
             result=func(**kwargs)
@@ -876,6 +882,8 @@ def itm_check(func): #decorator that applies to all items, first decorator layer
     def itm_wrapper(**kwargs):
         result=None
         targets:list=func(origin=kwargs["origin"],target=kwargs["target"],player=kwargs["player"],only_targeting=True)
+        if "original" not in kwargs:
+            kwargs["original"]=0
         for card in targets:
             if card != None and card.name != "Sunken": #porous body
                 if card == None:
@@ -883,7 +891,7 @@ def itm_check(func): #decorator that applies to all items, first decorator layer
                 else:
                     result=func(origin=kwargs["origin"],target=card,player=kwargs["player"],original=kwargs["original"])
                 kwargs["item"].uses-=1
-                if kwargs["item"].uses == 0:
+                if kwargs["item"].uses == 0 and kwargs["item"].condition != "when played":
                     kwargs["origin"].remove_item(kwargs["item"])
         return result
     return itm_wrapper
@@ -1294,6 +1302,8 @@ cards_sidebar_up_rect=Rect((cards_sidebar_rect.x-window_dim[0]/2,cards_sidebar_r
 cards_sidebar_down=transform.rotate(cards_sidebar_button,90)
 cards_sidebar_down_rect=Rect((cards_sidebar_rect.x-window_dim[0]/2,cards_sidebar_rect.y+230),(70,70))
 cards_sidebar_page=0
+deck_up:Rect=Rect(450,30,70,70)
+deck_down:Rect=Rect(950,30,70,70)
 items_left=(transform.scale(cards_sidebar_button,(40,40)),Rect(130,380,40,40))
 items_right=(transform.scale(transform.rotate(cards_sidebar_button,180),(40,40)),Rect(200,380,40,40))
 all_cut:list[list[Surface]]=[]
@@ -1358,6 +1368,7 @@ choosing_colour=False
 cards_sidebar=False
 coord_tooltip=False
 linger_anims:list[tuple[Surface,Coord,int,int,Literal["inverse down"]|Literal["inverse up"],int]]=[] #Surface to blit, anchor, end position, current frame, max frames,animation style.
+deck_offset=0
 
 #define cards here
 #Note: cards for deck use are defined by deckbuilder(), which takes these strings and eval()s them into objects
@@ -1410,7 +1421,7 @@ for deck in deck_presets:
     if deck.name == chosen_deck_name:
         chosen_deck=deck
 decklist_p1={"mobs":{eval(mob):chosen_deck.original_mobs[mob] for mob in chosen_deck.original_mobs},"items":{eval(item):chosen_deck.original_items[item] for item in chosen_deck.original_items}}
-decklist_p2={"mobs":{zombie:8},"items":{sword:10}}
+decklist_p2={"mobs":{bogged:8},"items":{sword:10}}
 deck_p1 = {"mobs":deckbuilder(decklist_p1["mobs"]),"items":deckbuilder(decklist_p1["items"])}
 deck_p2 = {"mobs":deckbuilder(decklist_p2["mobs"]),"items":deckbuilder(decklist_p2["items"])}
 playername="J1"
@@ -1444,6 +1455,12 @@ deck_items_text=mjgs.render("Items:",True,(0,0,0))
 select_deck_text=ClickableText(mjgs,"Use deck",(0,255,0),(window_dim[0]-mjgs.size("Use deck")[0]-100,750))
 deck_selected_text=mjgs.render("Deck selected",True,(180,180,180))
 deck_unusable_text=mjgs.render("Use deck",True,(180,180,180))
+if chosen_deck.usable:
+    menu_selected_deck_text=mjgs.render("Selected deck:",True,(0,0,0))
+else:
+    menu_selected_deck_text=mjgs.render("Selected deck:",True,(255,0,0))
+menu_deck_selected_text=mjgs.render(chosen_deck.name,True,contrast(chosen_deck.colour))
+deck_unusable_warning=mjgs.render("This deck is not usable",True,(200,0,0))
 while running:
     screen.blit(background,(0,0))
     if markers["monkey"] != 0:
@@ -1466,8 +1483,11 @@ while running:
             if state == "menu":
                 if host_text.textrect.collidepoint(pos):
                     if markers["do not connect"]:
-                        state="game"
-                        player2=Player("Player 2",2,(fields_anchor[0],fields_anchor[1]/2-card_dim[1]+10),[(x_rails[0],y_rails[0]),(x_rails[1],y_rails[0]),(x_rails[2],y_rails[0])])
+                        if chosen_deck.usable:
+                            state="game"
+                            player2=Player("Player 2",2,(fields_anchor[0],fields_anchor[1]/2-card_dim[1]+10),[(x_rails[0],y_rails[0]),(x_rails[1],y_rails[0]),(x_rails[2],y_rails[0])])
+                        else:
+                            linger_anims.append([deck_unusable_warning,(window_dim[0]/2-deck_unusable_warning.get_width()/2,400),0,120,"inverse down",0])
                     else:
                         connect_state="hosting"
                 elif connect_text.textrect.collidepoint(pos):
@@ -1488,6 +1508,11 @@ while running:
                     selected_deck=None
                     selected=None
                     selected_large=None
+                    chosen_deck.unpack(chosen_deck.mobs,chosen_deck.items,"whitelist",[])
+                    if not chosen_deck.usable:
+                        menu_selected_deck_text=mjgs.render("Selected deck:",True,(255,0,0))
+                    else:
+                        menu_selected_deck_text=mjgs.render("Selected deck:",True,(0,0,0))
                 elif selected_deck == None:
                     if delete_deck_text.textrect.collidepoint(pos) and deleting_deck == False:
                         deleting_deck=True
@@ -1506,6 +1531,10 @@ while running:
                             name=f"New Deck({copies})"
                         deck_presets.append(DeckPreset(name,max([deck.number for deck in deck_presets])+1,(255,255,255),{},{}))
                         selected_deck=deck_presets[-1]
+                    elif deck_up.collidepoint(pos) and deck_offset != 0:
+                        deck_offset-=1
+                    elif deck_down.collidepoint(pos) and not len(deck_presets)-5*deck_offset < 5:
+                        deck_offset+=1
                     else:
                         for preset in deck_presets:
                             if preset.outer_rect.collidepoint(pos):
@@ -1790,6 +1819,9 @@ while running:
             screen.blit(host_text.text, host_text.position)
             screen.blit(connect_text.text, connect_text.position)
             screen.blit(decks_text.text, decks_text.position)
+            screen.blit(menu_selected_deck_text,(950,675))
+            draw.rect(screen,chosen_deck.colour,Rect(1090-menu_deck_selected_text.get_width()/2,745,menu_deck_selected_text.get_width()+20,mjgs.get_height()+10))
+            screen.blit(menu_deck_selected_text,(1100-menu_deck_selected_text.get_width()/2,750))
         elif connect_state == "hosting":
             screen.blit(connecting_text,(window_dim[0]/2-mjgs.size("Waiting for connection")[0]/2,600))
             display.update()
@@ -1820,9 +1852,13 @@ while running:
             screen.blit(decks_title_text,(window_dim[0]/2-large_font.size("My Decks")[0]/2,25))
             screen.blit(create_deck_text.text,create_deck_text.position)
             screen.blit(delete_deck_text.text,delete_deck_text.position)
+            if deck_offset != 0:
+                screen.blit(cards_sidebar_up,deck_up)
+            if not len(deck_presets)-5*deck_offset < 5:
+                screen.blit(cards_sidebar_down,deck_down)
             if deck_presets != []:
-                for preset in deck_presets:
-                    preset.display()
+                for i in range(len(deck_presets)-5*deck_offset):
+                    deck_presets[i+5*deck_offset].display()
         else:
             screen.blit(deck_inspects_to_presets_text.text,deck_inspects_to_presets_text.position)
             if chosen_deck != selected_deck and selected_deck.usable:
@@ -2012,17 +2048,6 @@ while running:
                 markers["fade"]=[60,[10,220,70],255,0,0]
                 markers["fade"][4]=markers["fade"][2]/markers["fade"][0]
                 markers["game over called"]=True
-        for info in linger_anims:
-            if info[2]+1-info[3] == 0:
-                linger_anims.pop(linger_anims.index(info))
-                break
-            else:
-                linger_anims[linger_anims.index(info)]=(info[0],info[1],info[2]+1,info[3],info[4],info[5])
-                info=(info[0],info[1],info[2]+1,info[3],info[4],info[5])
-            if info[4] == "inverse up":
-                screen.blit(info[0],(info[1][0],info[1][1]+info[5]/info[2]))
-            elif info[4] == "inverse down":
-                screen.blit(info[0],(info[1][0],info[1][1]-info[5]/info[2]))
         screen.blit(mjgs.render(f"Abs:{str(abs_subturn)}, Sub:{str(subturn)}",True,(255,255,255)),(0,0))
 
     if state in game_overs:
@@ -2063,29 +2088,39 @@ while running:
     if coord_tooltip:
         draw.rect(screen,(255,255,255),Rect((mouse.get_pos()),(cursor_coord.get_width(),20)))
         screen.blit((cursor_coord),(mouse.get_pos()))
+    for info in linger_anims:
+        if info[2]+1-info[3] == 0:
+            linger_anims.pop(linger_anims.index(info))
+            break
+        else:
+            linger_anims[linger_anims.index(info)]=(info[0],info[1],info[2]+1,info[3],info[4],info[5])
+            info=(info[0],info[1],info[2]+1,info[3],info[4],info[5])
+        if info[4] == "inverse up":
+            screen.blit(info[0],(info[1][0],info[1][1]+info[5]/info[2]))
+        elif info[4] == "inverse down":
+            screen.blit(info[0],(info[1][0],info[1][1]-info[5]/info[2]))
     display.update()
     clock.tick(FPS)
 
     '''
     To-do:
     1. Figure out how to unblock hosting socket
-    2. Implement rest of gameplay loop:
-        i. Select card on field (large card pops up at side), or card in hand
-        ii. Select attack, or field position to place card in
-        iii. Send and receive data
-        iv. Action phase, you attack, opponent counters, opponent attacks, you counter. Alternatively, a card is placed
-    3. Does item application count as a subturn?
-    4. Get item stealing to work
-    5. Don't constantly load images, only do it when selected changes
-    6. Item application moving
-    7. Cards do a little jump when their passives activate
-    8. Implement setting colour for decks
-    9. Some semblance of player 2 AI (so people can play before i get co-op figured out)
-    10. execute() function to interpret and execute text-based instructions, used by player2 AI (maybe) and co-op communication (definitely)
-    11. 4 decks per page, add deck pages first (obviously)
-    12. Add icon to indicate selected deck in deck menu and text box in menu for same purpose
+    2. Does item application count as a subturn?
+    3. Get item stealing to work
+    4. HOLD: Don't constantly load images, only do it when selected changes
+    5. Item application moving
+    6. HOLD: Implement setting colour for decks
+    7. Some semblance of player 2 AI (so people can play before i get co-op figured out)
+    8. execute() function to interpret and execute text-based instructions, used by player2 AI (maybe) and co-op communication (definitely)
+    9. Items and hand cards start compressing if there are too many
 
     Bugs:
     1. FPS drop when game end screen comes into full opacity
     2. Colour wheel png is not actually transparent
+    3. Can't heal sheep if guarding
+    4. Elder's curse is cursed
+    5. Quick strike self-activates
+    6. Loot chest does not work
+    7. Egg rain does not delete
+    8. Shield crashes game
     '''
