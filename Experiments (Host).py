@@ -1,5 +1,6 @@
 import socket
 import select
+import os
 
 HOST = "127.0.0.1"  # Standard loopback interface address (localhost)
 PORT = 65432  # Port to listen on (non-privileged ports are > 1023)
@@ -17,9 +18,12 @@ Notes:
  - Receive info from the socket: s.recv(int), receives at maximum int bytes from the socket
  - Blocks until the socket has something to receive. Very problematic.
 '''
-
-s= socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-s.bind((HOST, PORT))
-s.listen()
-s.setblocking(False)
-
+with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+    s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    s.bind((HOST, PORT))
+    s.listen()
+    sock, addr= s.accept()
+    print(f"Accepted connection at {addr}")
+    print(s.recv(1024).decode())
+    s.send("Hello Internet".encode())
+    print(s.recv(1024).decode())

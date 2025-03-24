@@ -10,10 +10,11 @@ Steps to make client socket:
 2. Connect to host (blocks until connected or failed): s.connect((HOST, PORT))
 '''
 
-s= socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-s.connect((HOST, PORT))
-s.setblocking(False)
-print(str(s.send(b"Connected")))
-data = s.recv(1024)
-print(f"Client: {data}")
-s.send(data)
+with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+    s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    #s.setblocking(False)
+    s.connect((HOST, PORT))
+    print(str(s.send(b"Connected")))
+    data = s.recv(1024)
+    print(f"Client: {data}")
+    s.send(data)

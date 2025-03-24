@@ -64,11 +64,11 @@ Abilities take four arguments: origin, target, player and loc.
 Origin is the attacking mob.
 Target is the target mob.
 Player is the player the attacking mob belongs to.
-Loc is the coordinates of the card that used the passive
+Loc is the coordinates of the card that used the ability
     Used by psv_check to add to linger_anims
 
 Abilities return one or two values: [0]:bool and {[1]:str}.
-[0] is a boolean value indicating if the passive's effect took place.
+[0] is a boolean value indicating if the ability's effect took place.
     This is used in psv_check() to set Mob.move_anim
 [1] is a versatile string used to modulate several routines.
     [1]="break", used by wool_guard(), stops the attack routine from cycling through the rest of the targets in the target list. I can't remember why this is needed but it's best not to touch it.
@@ -89,6 +89,7 @@ Items return no values or one value: {[0]:list} and {[1]:list[bool,int,list]}.
     The effect is executed on all of them. Only returned if only_targeting is True. Can be [None].
 [1] is the modified original value, composed of whether the attack is melee or ranged, its damage and its targets.
     Used only by "on attack" items.
+    A fourth value is sometimes added. The presence of this value causes the item scanning routine to break.
     itm_check() uses this as the new attack value for the current card.
 
 # Certain variables
@@ -101,3 +102,82 @@ A list of tuples. Each tuple cotains:
 [4]\:str: The equation used to show the animation.
     For now, takes values of "inverse up" or "inverse down", -/+ 1/x
 [5]\:int: The scale of the animation.
+
+# Instruction string format
+The instruction string is usually made of up to 5 characters: [0][1][2][3][4].
+[0] is the type of instruction.
+    "n" indicates sending the player's name.
+    "c" indicates the player has conceded or exited.
+    "m/i/a/p" indicates the player has used a card.
+    "g" indicates the opponent is still connected
+    "x" indicates the player has no moves and to proceed
+If [0]="n", the following information is the name.
+If [0]="c", there is no following information.
+If [0]="m", the player used a mob move.
+    [1] is the field position of the mob.
+    [2] is the move number.
+    [3] is the number of the target on the opponent's field
+If [0]="i", the player used an item move.
+    [1] is the hand position of the item.
+    [2] is the field mob to play it onto. (3 is whole field targeting)
+    [3] is the player whose field [2] refers to (not present if whole field targeting).
+If [0]="a", the player used an ability.
+    [1] is the field position of the mob.
+    [2] is the ability number of the ability
+    [3] is the target of the ability. (3 if whole field targeting)
+    [4] is the player whose field [3] refers to (not present if whole field targeting).
+If [0]="p", the player placed a mob down.
+    [1] is the hand position of the mob.
+    [2] is the field position to place to.
+If [0]="g", there is no following information.
+    In the abscence of commands, "g" is constantly written to the socket.
+    If nothing is received, a countdown is started.
+    If at the end of the countdown, still nothing is received, it is assumed the opponent has disconencted and the game ends with them conceding.
+If [0]="x", there is no following information.
+Note that the only information communicated is the player's direct action.
+Any passives, items, etc. that activate are handled by the client.
+
+# Player 2 move logic
+Player 2's hand, field and souls are loaded into the function.
+A random card is chosen from available_cards (a combination of the hand and the field) and is checked for playability. If it is not playable, the card is removed from available_cards and the cycle restarts. Otherwise, the instruction string is compiled, the loop is broken, and the function returns.
+
+If the card is a mob, it is first checked whether it is in the hand or the field. If it is in the hand, a field slot is available, and the cardcan be afforded, the card is placed. Otherwise, the check fails.
+If it is in the field, a random move or ability is chosen from its moveset. If a move is chosen, it is executed. If an ability is chosen and can be afforded, it is used. Otherwise, the check fails.
+
+If the card is an item, if it can be afforded, it is placed onto a random targetable mob. If it is too expensive, the check fails.
+
+# Temporary notes on application:
+## Item application
+```py
+#in main module click handling
+if card in player1.field:
+    player1.add_to_field(player1.hand.index(selected),player1.field.index(card)+1)
+elif card in player2.field:
+    player2.add_to_field(None,player2.field.index(card)+1,ignore_cost=True,card_override=selected,pos_override=card)
+    player1.hand.pop(player1.hand.index(selected))
+    player1.souls -= selected.cost
+if targets == [whole_field]:
+    player1.add_to_field(0,0,False,card_override=selected,pos_override=card)
+```
+## Mob move using
+```py
+#in main module click handling
+if type(selected_move) != Ability:
+    counter=selected_move(origin=selected,target=target,player=player1,noattack=False)
+    if len(target.moveset) > 0:
+        other_counter=target.moveset[0](origin=target,target=selected,player=player2,noattack=True)
+    else:
+        counter=False
+        other_counter=not counter
+    selected.startmove([(target.rect.x,target.rect.y),(selected.rect.x,selected.rect.y)],[10,10])
+    if (counter == True or counter == other_counter) and len(target.moveset) > 0:
+        card.moveset[0](origin=target,target=selected,player=player2,noattack=False)
+else:
+    result=selected_move.effect(origin=selected,target=target,player=player1,loc=(selected.rect.x,selected.rect.y+cut_dim[1]/2))
+```
+## Adding mobs to the field
+```py
+#in main module click handling
+player1.add_to_field(player1.hand.index(selected),i+1)
+```
+In theory, this is all the code that needs to be copied into execute(), and player2.add_to_field will do the rest. However, it will need to be checked beforehand for player-dependant information and suites. I may have gotten a bit lazy sometimes.
