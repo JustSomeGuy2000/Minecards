@@ -24,6 +24,7 @@ type Attack_params = dict[Literal["origin"]:Card,Literal["target"]:Card,Literal[
 
 window_dim=(1500,850)
 screen=display.set_mode(window_dim)
+display.set_caption("Minecards")
 font.init()
 mjgs=font.Font(r"Assets\mojangles.ttf",40)
 small_font=font.Font(r"Assets\mojangles.ttf",20)
@@ -58,7 +59,7 @@ class Mob(sprite.Sprite):
         self.front_sprite=transform.scale(image.load(sprite),card_dim).convert()
         self.original_sprite=sprite
         self.cut_sprite=transform.scale(image.load(cut_sprite),cut_dim).convert()
-        self.back_sprite=transform.scale(image.load(cardback),card_dim).convert()
+        self.back_sprite=cardback
         self.current_sprite=self.front_sprite
         self.rect=self.current_sprite.get_rect()
         self.rect.x=init_pos[0]
@@ -99,6 +100,8 @@ class Mob(sprite.Sprite):
     def update(self):
         global move_hovering_over
         global setup
+        if cardback != self.back_sprite:
+            self.back_sprite=cardback
         if self.timer!=0:
             self.internal_coords[0]+=self.velocity[0]
             self.internal_coords[1]+=self.velocity[1]
@@ -234,10 +237,16 @@ class Item(sprite.Sprite):
         self.uses=uses
         self.targets=targets
         #SPRITE AND COORDS
-        self.front_sprite=transform.scale(image.load(sprite),dimensions).convert_alpha()
+        if type(sprite) == str:
+            self.front_sprite=transform.scale(image.load(sprite),dimensions).convert_alpha()
+        else:
+            self.front_sprite=sprite
         self.original_sprite=sprite
-        self.cut_sprite=transform.scale(image.load(cut_sprite),item_dim).convert()
-        self.back_sprite=transform.scale(image.load(cardback),card_dim).convert()
+        if type(sprite) == str:
+            self.cut_sprite=transform.scale(image.load(cut_sprite),item_dim).convert()
+        else:
+            self.cut_sprite=sprite
+        self.back_sprite=cardback
         self.current_sprite=self.front_sprite
         self.rect=self.current_sprite.get_rect()
         self.rect.x=init_pos[0]
@@ -265,6 +274,8 @@ class Item(sprite.Sprite):
 
     def update(self):
         global move_hovering_over
+        if cardback != self.back_sprite:
+            self.back_sprite=cardback
         if self.timer!=0:
             self.internal_coords[0]+=self.velocity[0]
             self.internal_coords[1]+=self.velocity[1]
@@ -715,6 +726,22 @@ class DeckPreset(): #this gets confusing fast so I'll be leaving some comments
         else:
             self.usable=False
 
+class BGTile(): #a container for background changing information
+    def __init__(self,img:Surface,path:Path,name:str,pos:Coord):
+        self.img=img
+        self.path=path
+        self.name=name
+        self.text=mjgs.render(name,True,(0,0,0))
+        self.pos=pos
+        self.rect=self.img.get_rect(x=pos[0],y=pos[1])
+        self.textpos=(pos[0]+(self.rect.width/2-self.text.get_width()/2),pos[1]+self.rect.height+20)
+
+    def display(self):
+        if chosen_card_bg == self.name:
+            draw.rect(screen,ORANGE,Rect(self.pos[0]-10,self.pos[1]-10,self.rect.width+20,self.rect.height+20))
+        screen.blit(self.img,self.pos)
+        screen.blit(self.text,self.textpos)
+
 def excepthook(type, value, traceback):
     print(f"Error: {type.__name__}\nReason: {value}\nTraceback :\n{str(t.format_tb(traceback))}")
     name="crash_log_"+str(tm.time())+".txt"
@@ -846,9 +873,9 @@ def execute(instr:bytes|None): #executes moves on behalf of player2 according to
         markers["await p2"]=False
     else:
         raise RuntimeError(f"Invalid instructions received: {instr}")
-    print(instr)
+    #print(instr)
 
-def p2_move(hand:list[Card],field:list[Mob|None],souls:int) -> str: #returns an encoded string to be passed to execute()
+def p2_move(hand:list[Card],field:list[Mob|None],souls:int) -> bytes: #returns an encoded string to be passed to execute()
     hand=copy.copy(hand)
     field=copy.copy(field)
     available_cards=hand+field
@@ -1018,6 +1045,7 @@ def run_once(func): #decorator that ensures functions run only once
 def nofunction_item(**kwargs):
     pass
 
+#region gameplay functions
 @atk_check
 def bite(**kwargs:Attack_params) -> tuple[Literal[True],Literal[2]]: #attack
     dmg=0
@@ -1392,8 +1420,9 @@ def wool_guard(**kwargs) -> tuple[Literal[True],Literal["break"]]|None: #ability
             kwargs["origin"].proxy.internal_coords[0], kwargs["origin"].proxy.internal_coords[1]= player1.field_pos[player1.field.index(kwargs["origin"].proxy)]
             kwargs["origin"].proxy=None
         return True,"break"
+#endregion
 
-#constants
+#region constants
 title_img=transform.scale(image.load(r"Assets\title.png"),(842,120)).convert_alpha()
 card_dim=(150,225)
 card_dim_rot=(225,150)
@@ -1407,7 +1436,6 @@ SOUL_COLOUR=(255,255,255)
 M_BLUE=(50,190,220)
 starting_cards=5
 drawing_cards=2
-cardback=r"Assets\mob_back.png"
 background=transform.scale(image.load(r"Assets\background.png"),window_dim).convert()
 FPS=60
 clock=time.Clock()
@@ -1424,7 +1452,8 @@ monkey_sprite=transform.scale(image.load(r"Assets\monkey.png"),(840*(window_dim[
 subturn_sprites=[transform.scale(image.load(r"Assets\abs_subturn_none.png"),(150,360)).convert_alpha(),transform.scale(image.load(r"Assets\abs_subturn_1.webp"),(150,360)).convert_alpha(),transform.scale(image.load(r"Assets\abs_subturn_2.webp"),(150,360)).convert_alpha(),transform.scale(image.load(r"Assets\abs_subturn_3.png"),(150,360)).convert_alpha()]
 #sys.excepthook=excepthook
 game_id=str(int(tm.time()))
-infofile=open(r"Assets\info.bin","rb")
+infofile=open(r"Assets\d_info.hex","rb")
+player_infofile=open(r"Assets\p_info.hex","rb")
 colour_wheel=transform.scale(image.load(r"Assets\colour_wheel.png").convert_alpha(),(70,70))
 colour_wheel_rect=Rect(window_dim[0]-90,20,70,70)
 cards_sidebar_button=transform.scale(image.load(r"Assets\cards_sidebar.png"),(70,70)).convert_alpha()
@@ -1468,9 +1497,14 @@ for page in all_cut:
     all_cut_rects.append(temp)
     temp=[]
 deck_cards_pos=[(20+cut_dim[0])*i+20 for i in range(10)]
-settings_button:tuple[Surface,Rect]=(transform.scale(image.load(r"Assets\settings.png"),(70,70)),Rect(window_dim[0]-70,0,70,70))
+settings_button:tuple[Surface,Rect]=(transform.scale(image.load(r"Assets\settings.png"),(70,70)).convert_alpha(),Rect(window_dim[0]-70,0,70,70))
+card_bgs_raw=[file for file in os.scandir(r"Assets\Backs")]
+card_bgs:list[BGTile]=[]
+for i in range(len(card_bgs_raw)):
+    card_bgs.append(BGTile(transform.scale(image.load(f"Assets\\Backs\\{card_bgs_raw[i].name}"),card_dim),f"Assets\\Backs\\{card_bgs_raw[i].name}",card_bgs_raw[i].name.split(".")[0].capitalize(),(50+(card_dim[0]+50)*(i%8),100+(card_dim[1]+75)*(i//3))))
+#endregion
 
-#variables
+#region variables
 running=True
 state="menu"
 connect_state="idle"
@@ -1493,6 +1527,7 @@ targets=[]
 until_end=0
 ability_selected=False
 infojson:dict[str,dict]=json.loads(b.unhexlify(infofile.read()))
+playerjson:dict[str,dict]=json.loads(b.unhexlify(player_infofile.read()))
 selected_deck:None|DeckPreset=None
 selected_large=None
 deleting_deck=False
@@ -1506,11 +1541,16 @@ last_screen=None
 sockinfo=None
 sock_write=None
 disconnect_cd=600
+name_changing=False
+subsetting=None
+chosen_card_bg=playerjson["chosen card bg"]
+cardback=transform.scale(image.load(f"Assets\\Backs\\{chosen_card_bg.lower()}.png"),card_dim).convert_alpha()
+#endregion
 
-#define cards here
+#region card definitions
 #Note: cards for deck use are defined by deckbuilder(), which takes these strings and eval()s them into objects
 #This is so each deck entry has a separate memory value
-deck_plc=Item("Deck Placeholder",0,None,r"Assets\card_back_rot.png",(100,262),r"Assets\card_back_rot.png",None,card_dim_rot,'',None,None)
+deck_plc=Item("Deck Placeholder",0,None,transform.rotate(cardback,90),(100,262),transform.rotate(cardback,90),None,card_dim_rot,'',None,None)
 whole_field=Item("THE ENTIRE FIELD!!!",0,nofunction_item,r"Sprites\Whole Field.png",(fields_anchor[0],fields_anchor[1]),r"Sprites\Whole Field.png","pink",(3*cut_dim[0]+3*card_spacing_x,2*cut_dim[1]+card_dim_rot[1]+2*card_spacing_y),None,None,None)
 preset_dummy=Mob("Dummy",0,999,[],[bite],{},{},"misc","plains","pink",r"Sprites\Dummy.png",(0,0),r"Cut Sprites\Dummy.png",[(987,512,1323,579)])
 axolotl=r'Mob("Axolotl",3,3,[],[bite],{"on death":play_dead},{},"aquatic","ocean","blue",r"Sprites\Axolotl.png",(0,0),r"Cut SPrites\Axolotl.png",[(987,512,1323,579)])'
@@ -1545,7 +1585,9 @@ trident=r'Item("Trident",2,trident_stab,r"Sprites\Trident.png",(0,0),r"Cut SPrit
 witch=r'Mob("Witch",3,4,[Ability(1,witch_poison,"player2 field"),Ability(1,witch_healing,"player1 field")],[],{"end this turn":self_aid},{},["human"],"swamp","blue",r"Sprites\Witch.png",(0,0),r"Cut Sprites\Witch.png",[(987,497,1323,569),(987,569,1323,639)],poison_count=0,heal_count=0)'
 zombie=r'Mob("Zombie",2,4,[],[bite],{"on hurt":undead},{},"undead","cavern","blue",r"Sprites\Zombie.png",(0,0),r"Cut Sprites\Zombie.png",[(987,512,1323,579)])'
 #Mob()
+#endregion
 
+#region deck stuff
 tiles:list[dict[str,Tile]]=[{all_cut_names[i][j]:Tile(all_cut_names[i][j],all_cut_fulls[i][j],all_cut[i][j],type(eval(eval(all_cut_names[i][j]))).__name__,eval(eval(all_cut_names[i][j])).border,all_cut_rects[i][j]) for j in range(len(all_cut[i]))} for i in range(len(all_cut))]
 d_tiles:dict[str,Tile]={}
 for sub in tiles:
@@ -1561,12 +1603,12 @@ decklist_p1={"mobs":{eval(mob):chosen_deck.original_mobs[mob] for mob in chosen_
 decklist_p2={"mobs":{bogged:8},"items":{sword:10}}
 deck_p1 = {"mobs":deckbuilder(decklist_p1["mobs"]),"items":deckbuilder(decklist_p1["items"])}
 deck_p2 = {"mobs":deckbuilder(decklist_p2["mobs"]),"items":deckbuilder(decklist_p2["items"])}
-playername="J1"
+playername=playerjson["name"]
 player1=Player(playername,1,(fields_anchor[0],y_rails[1]+cut_dim[1]+card_spacing_y),[(x_rails[0],y_rails[1]),(x_rails[1],y_rails[1]),(x_rails[2],y_rails[1])])
 player2:Player=''
+#endregion
 
-display.set_caption("Minecards")
-
+#region texts
 beta_text=mjgs.render("Closed Beta",True,(255,100,0))
 host_text=ClickableText(mjgs,"Create Game",(0,0,0),(window_dim[0]/2-mjgs.size("Create Game")[0]/2,550))
 connect_text=ClickableText(mjgs,"Join Game",(0,0,0),(window_dim[0]/2-mjgs.size("Join Game")[0]/2,650))
@@ -1602,6 +1644,14 @@ opp_conc_text=large_font.render("Opponent conceded",True,(30,150,20))
 you_conc_text=large_font.render("You conceded",True,(255,0,0))
 conc_text=ClickableText(mjgs,"Concede",(255,0,0),(window_dim[0]/2-mjgs.size("Concede")[0]/2,window_dim[1]/2))
 settings_text=large_font.render("Settings",True,(0,0,0))
+name_change_text=ClickableText(mjgs,"Change name",(0,0,0),(window_dim[0]/2,150))
+to_profile_text=ClickableText(mjgs,"Profile",(0,0,0),(window_dim[0]/2-mjgs.size("Profile")[0]/2,200))
+to_bg_cstm_text=ClickableText(mjgs,"Change background",(0,0,0),(window_dim[0]/2-mjgs.size("Change background")[0]/2,400))
+settings_back_text=ClickableText(mjgs,"Back",(0,0,0),(window_dim[0]/2-mjgs.size("Back")[0]/2,750))
+playername_text=mjgs.render(f"Name: {playername}",True,(0,0,0))
+cardbg_change_text=ClickableText(mjgs,"Change card back",(0,0,0),(window_dim[0]/2-mjgs.size("Change card back")[0]/2,300))
+#endregion
+
 while running:
     screen.blit(background,(0,0))
     if markers["monkey"] != 0:
@@ -1622,17 +1672,24 @@ while running:
     for e in event.get():
         if e.type == QUIT:
             infofile.close()
-            infofile=open(r"Assets\info.bin","wb")
+            infofile=open(r"Assets\d_info.hex","wb")
             final_json={x[0]:x[1] for x in [preset.to_dict() for preset in deck_presets]}
             final_json.update({"<chosen>":chosen_deck.name})
             infofile.write(b.hexlify(json.dumps(final_json).encode()))
             infofile.close()
+            player_infofile.close()
+            player_infofile=open(r"Assets\p_info.hex","wb")
+            playerjson["name"]=playername
+            playerjson["chosen card bg"]=chosen_card_bg
+            player_infofile.write(b.hexlify(json.dumps(playerjson).encode()))
+            player_infofile.close()
             running=False
         elif e.type == MOUSEBUTTONUP and state not in game_overs and not markers["freeze"] and not markers["await p2"]:
             pos:Coord=mouse.get_pos()
             if settings_button[1].collidepoint(pos):
                 if state == "settings":
                     state = last_screen
+                    subsetting=None
                 else:
                     last_screen = state
                     state = "settings"
@@ -1659,10 +1716,32 @@ while running:
                     state="deck screen"
 
             elif state == "settings":
-                if conc_text.textrect.collidepoint(pos) and last_screen == "game":
+                if settings_back_text.textrect.collidepoint(pos):
+                    if subsetting == None:
+                        state=last_screen
+                    if subsetting == "profile":
+                        name_changing=False
+                    subsetting=None
+                elif conc_text.textrect.collidepoint(pos) and last_screen == "game":
                     markers["concede"]="you"
                     setup=False
                     state="lose"
+                elif last_screen == "menu":
+                    if to_profile_text.textrect.collidepoint(pos):
+                        subsetting="profile"
+                    elif to_bg_cstm_text.textrect.collidepoint(pos):
+                        subsetting="bg"
+                    elif cardbg_change_text.textrect.collidepoint(pos):
+                        subsetting="cardbg"
+                    elif subsetting == "profile":
+                        if name_change_text.textrect.collidepoint(pos):
+                            name_changing=True
+                    elif subsetting == "cardbg":
+                        for bg in card_bgs:
+                            if bg.rect.collidepoint(pos):
+                                chosen_card_bg=bg.name
+                                cardback=transform.scale(image.load(bg.path),card_dim).convert_alpha()
+                                deck_plc.current_sprite=transform.rotate(cardback,90)
 
             elif state == "deck screen":
                 if decks_to_menu_text.textrect.collidepoint(pos):
@@ -1971,10 +2050,18 @@ while running:
                     HOST = HOST[:-1]
                 else:
                     HOST += e.unicode
-            if e.key == K_e and connect_state != "connecting" and editing_deck_title == False:
-                raise RuntimeError("User called exception.")
+            '''if e.key == K_e and connect_state != "connecting" and editing_deck_title == False:
+                raise RuntimeError("User called exception.")'''
             if state == "deck screen" and selected_deck != None and editing_deck_title == True:
                 selected_deck.edit_title(e)
+            if name_changing:
+                if e.key == K_BACKSPACE:
+                    playername=playername[:-1] 
+                elif e.key == K_RETURN or e.key == K_ESCAPE:
+                    name_changing=False
+                elif len(playername) < 15:
+                    playername += e.unicode
+                playername_text=mjgs.render(f"Name: {playername}",True,(0,0,0))
 
     if state == "menu":
         screen.blit(title_img,(window_dim[0]/2-421,165))
@@ -2270,8 +2357,23 @@ while running:
             screen.blit(info[0],(info[1][0],info[1][1]-info[5]/info[2]))
     if state == "settings":
         screen.blit(settings_text,(window_dim[0]/2-settings_text.get_width()/2,10))
+        screen.blit(settings_back_text.text,settings_back_text.position)
         if last_screen == "game":
             screen.blit(conc_text.text,conc_text.position)
+        elif last_screen == "menu":
+            if subsetting == None:
+                screen.blit(to_profile_text.text,to_profile_text.position)
+                screen.blit(to_bg_cstm_text.text,to_bg_cstm_text.position)
+                screen.blit(cardbg_change_text.text,cardbg_change_text.position)
+            if subsetting == "profile":
+                screen.blit(name_change_text.text,name_change_text.position)
+                screen.blit(playername_text,(250,150))
+                if name_changing:
+                    draw.rect(screen,(255,255,255),Rect(window_dim[0]/2,200,window_dim[0]/2-50,60))
+                    screen.blit(mjgs.render(playername,True,(0,0,0)),(window_dim[0]/2+10,210))
+            if subsetting == "cardbg":
+                for bg in card_bgs:
+                    bg.display()
     screen.blit(settings_button[0],settings_button[1])
     if markers["disconnecting"]:
         disconnect_cd -= 1
