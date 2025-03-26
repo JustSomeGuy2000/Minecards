@@ -7,7 +7,8 @@
 "on this turn: Called at the start of this mob's move
 "end this turn": Called immediately after this mob's move
 "when played": Called immediately
-"always": checks all the time
+"always": Checks all the time
+"on action": Called when a passive, ability, or attack activates (to be implemented for egg rain)
 
 # Effect format and return requirements
 ## Attacks:
@@ -86,7 +87,7 @@ Original/damage is the damage being dealt.
 
 Items return no values or one value: {[0]:list} and {[1]:list[bool,int,list]}.
 [0] is a list of the item's targets.
-    The effect is executed on all of them. Only returned if only_targeting is True. Can be [None].
+    The effect is executed on all of them. Only returned if only_targeting is True. Can be [None] if the item is not executed on a card (e.g. Loot Chest)
 [1] is the modified original value, composed of whether the attack is melee or ranged, its damage and its targets.
     Used only by "on attack" items.
     A fourth value is sometimes added. The presence of this value causes the item scanning routine to break.
@@ -146,38 +147,4 @@ If it is in the field, a random move or ability is chosen from its moveset. If a
 
 If the card is an item, if it can be afforded, it is placed onto a random targetable mob. If it is too expensive, the check fails.
 
-# Temporary notes on application:
-## Item application
-```py
-#in main module click handling
-if card in player1.field:
-    player1.add_to_field(player1.hand.index(selected),player1.field.index(card)+1)
-elif card in player2.field:
-    player2.add_to_field(None,player2.field.index(card)+1,ignore_cost=True,card_override=selected,pos_override=card)
-    player1.hand.pop(player1.hand.index(selected))
-    player1.souls -= selected.cost
-if targets == [whole_field]:
-    player1.add_to_field(0,0,False,card_override=selected,pos_override=card)
-```
-## Mob move using
-```py
-#in main module click handling
-if type(selected_move) != Ability:
-    counter=selected_move(origin=selected,target=target,player=player1,noattack=False)
-    if len(target.moveset) > 0:
-        other_counter=target.moveset[0](origin=target,target=selected,player=player2,noattack=True)
-    else:
-        counter=False
-        other_counter=not counter
-    selected.startmove([(target.rect.x,target.rect.y),(selected.rect.x,selected.rect.y)],[10,10])
-    if (counter == True or counter == other_counter) and len(target.moveset) > 0:
-        card.moveset[0](origin=target,target=selected,player=player2,noattack=False)
-else:
-    result=selected_move.effect(origin=selected,target=target,player=player1,loc=(selected.rect.x,selected.rect.y+cut_dim[1]/2))
-```
-## Adding mobs to the field
-```py
-#in main module click handling
-player1.add_to_field(player1.hand.index(selected),i+1)
-```
-In theory, this is all the code that needs to be copied into execute(), and player2.add_to_field will do the rest. However, it will need to be checked beforehand for player-dependant information and suites. I may have gotten a bit lazy sometimes.
+# Code routes
