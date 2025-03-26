@@ -55,6 +55,7 @@ class Mob(sprite.Sprite):
         self.original_miscs=kwargs
         self.proxy_for=None
         self.proxy=None
+        self.owned_by=None
         #SPRITE AND COORDS
         self.front_sprite=transform.scale(image.load(sprite),card_dim).convert()
         self.original_sprite=sprite
@@ -199,6 +200,7 @@ class Mob(sprite.Sprite):
             self.items[item.condition]=[item]
         else:
             self.items[item.condition].append(item)
+        item.placed_on=self
 
     def remove_item(self,item:Item):
         for key in self.items:
@@ -225,7 +227,7 @@ def get_temp_text(textfont:font.Font,text:str,colour:tuple[int,int,int],loc:Coor
         return temp,(loc[0]+cut_dim[0]/2-temp.get_width()/2,loc[1])
 
 class Item(sprite.Sprite):
-    def __init__(self,name:str,cost:int,effect:Callable,sprite:Path,init_pos:Coord,cut_sprite:Path,border:Literal["blue","pink"],dimensions:Size,condition:Literal["end of turn","start of turn","on death","on hurt","on attack","when played"],uses:int,targets:Literal["can be healed","player1 field","player2 field","whole field","all on field","all healable"]):
+    def __init__(self,name:str,cost:int,effect:Callable,sprite:Path,init_pos:Coord,cut_sprite:Path,border:Literal["blue","pink"],dimensions:Size,condition:Literal["end of turn","start of turn","on death","on hurt","on attack","when played"],uses:int,targets:Literal["can be healed","your field","opp field","whole field","all on field","all healable"]):
         super().__init__()
         #ITEM INFO
         self.name=name
@@ -236,6 +238,8 @@ class Item(sprite.Sprite):
         self.condition=condition #when the item activates
         self.uses=uses
         self.targets=targets
+        self.owned_by=None
+        self.placed_on=None
         #SPRITE AND COORDS
         if type(sprite) == str:
             self.front_sprite=transform.scale(image.load(sprite),dimensions).convert_alpha()
@@ -300,8 +304,9 @@ class Item(sprite.Sprite):
         if attack_progressing and selected == self:
             draw.rect(screen,ORANGE,Rect(self.display_rect.left-5,self.display_rect.top-5,self.display_rect.width,self.display_rect.height),5)
         if selected == self and self.display_rect.collidepoint(mouse.get_pos()) and not attack_progressing:
-            draw.rect(screen,ORANGE,Rect(self.display_rect.left-5,self.display_rect.top-5,self.display_rect.width,self.display_rect.height),5)
-            move_hovering_over=(self.display_rect,self.effect)
+            if not True in [card.rect.collidepoint(mouse.get_pos()) for card in player1.hand]:
+                draw.rect(screen,ORANGE,Rect(self.display_rect.left-5,self.display_rect.top-5,self.display_rect.width,self.display_rect.height),5)
+                move_hovering_over=(self.display_rect,self.effect)
         self.rect.x, self.rect.y=int(self.internal_coords[0]),int(self.internal_coords[1])
         screen.blit(self.current_sprite, (self.rect.x,self.rect.y))
 
@@ -339,6 +344,16 @@ class Item(sprite.Sprite):
         elif self.targets == "special: goat horn":
             if len([i for i in player2.field if i is not None]) > 1:
                 tempt=player2.field
+        elif self.targets == "your field":
+            if self.owned_by == player1:
+                tempt=player1.field
+            else:
+                tempt=player2.field
+        elif self.targets == "opp field":
+            if self.owned_by == player1:
+                tempt=player2.field
+            else:
+                tempt=player1.field
         return tempt
 
 class Player():
@@ -441,10 +456,8 @@ class Player():
                     true_target=self.field[pos-1]
                 else:
                     true_target=pos_override
-                result:list=target.effect(target=true_target, origin=target, player=self, item=target, only_targeting=True)
+                target.placed_on=true_target
                 target.effect(target=true_target, origin=target, player=self, item=target)
-                if target.uses <= 0 and result == [None]:
-                    self.hand.pop(self.hand.index(target))
 
     def reset(self):
         self.hand=[]
@@ -460,10 +473,14 @@ class ClickableText():
         self.textrect.y=position[1]
 
 class Ability():
-    def __init__(self,cost:int,effect:Callable,targets:str):
+    def __init__(self,cost:int,effect:Callable,targets:str,name:str=None):
         self.cost=cost
         self.effect=effect
         self.targets=targets
+        if name == None:
+            self.name=effect.__name__
+        else:
+            self.name=name
 
     def find_targets(self, selected):
         global whole_field
@@ -744,7 +761,7 @@ class BGTile(): #a container for background changing information
 
 def excepthook(type, value, traceback):
     print(f"Error: {type.__name__}\nReason: {value}\nTraceback :\n{str(t.format_tb(traceback))}")
-    name="crash_log_"+str(tm.time())+".txt"
+    name="crashes\\crash_log_"+str(tm.time())+".txt"
     temp_tb=t.format_tb(traceback)
     crashlog=open(name,"wt")
     crashlog.write("If you are seeing this, please contact the creator with this file here:\n24149007@imail.sunway.edu.my\n\n")
@@ -790,6 +807,7 @@ def draw_card(player:Player,draw_from:dict[Card,int],amount:int=1,override=None)
         card_list.append(card)
         card.internal_coords=[100,262]
         card.startmove([(player.hand_pos[0]+card_dim[0]*(len(player.hand)-1),player.hand_pos[1])],[30])
+        card.owned_by=player
     if len(card_list) == 1:
         return card_list[0]
     else:
@@ -831,7 +849,7 @@ def unpack():
             if deck_name[0] != "<":
                 deck_presets.append(DeckPreset(deck_name,infojson[deck_name]["number"],infojson[deck_name]["colour"],infojson[deck_name]["mobs"],infojson[deck_name]["items"]))
 
-def execute(instr:bytes|None): #executes moves on behalf of player2 according to a instruction string
+def execute(instr:bytes|None) -> bool|str: #executes moves on behalf of player2 according to a instruction string
     global markers
     global state
     global setup
@@ -840,24 +858,38 @@ def execute(instr:bytes|None): #executes moves on behalf of player2 according to
         instr:str=instr.decode()
     if instr == None or instr == '':
         if sock == '': #game has not started
-            pass
+            return False
         else: #potential disconnect,start countdown
             markers["disconnecting"]=True
+            return True
     elif instr[0] == "n": #receiving name
         return instr[1:]
     elif instr[0] == "c": #opponent conceded
         state="win"
         setup=False
         markers["concede"]="opp"
+        return False
     elif instr[0] == "m": #attack used
-        player2.field[int(instr[1])].moveset[int(instr[2])](origin=player2.field[int(instr[1])],target=player1.field[int(instr[3])],player=player2)
+        attacker=player2.field[int(instr[1])]
+        attacked=player1.field[int(instr[3])]
+        counter=attacker.moveset[int(instr[2])](origin=attacker,target=attacked,player=player2,noattack=False)
+        attacker.startmove([(attacked.rect.x,attacked.rect.y),(attacker.rect.x,attacker.rect.y)],[10,10])
+        if len(attacked.moveset) > 0:
+            other_counter=attacked.moveset[0](origin=attacked,target=attacker,player=player1,noattack=True)
+        else:
+            counter=False
+            other_counter=not counter
+        if (counter == True or counter == other_counter) and len(attacked.moveset) > 0:
+            attacked.moveset[0](origin=attacked,target=attacker,player=player1,noattack=False)
+        return False
     elif instr[0] == "i": #placed item
         if instr[2] == "3":
             player2.add_to_field(0,0,False,card_override=player2.hand[int(instr[1])],pos_override=whole_field)
         elif instr[3] == "2":
-            player2.add_to_field(player2.hand[int(instr[1])],player2.field[int(instr[2])])
+            player2.add_to_field(int(instr[1]),int(instr[2])+1)
         elif instr[3] == "1":
-            player1.add_to_field(None,player1.field[int(instr[2])]+1,ignore_cost=True,card_override=player2.hand[int(instr[1])],pos_override=player1.field[int(instr[2])])
+            player1.add_to_field(None,int(instr[2])+1,ignore_cost=True,card_override=player2.hand[int(instr[1])],pos_override=player1.field[int(instr[2])])
+        return False
     elif instr[0] == "a": #ability used
         if instr[3] == "3":
             player2.field[int(instr[1])].abilities[int(instr[2])].effect(origin=player2.field[int(instr[1])],target=whole_field,player=player2,loc=(player2.field[int(instr[1])].rect.x,player2.field[int(instr[1])].rect.y))
@@ -865,12 +897,14 @@ def execute(instr:bytes|None): #executes moves on behalf of player2 according to
             player2.field[int(instr[1])].abilities[int(instr[2])].effect(origin=player2.field[int(instr[1])],target=player2.field[int(instr[3])],player=player2,loc=(player2.field[int(instr[1])].rect.x,player2.field[int(instr[1])].rect.y))
         elif instr[4] == "1":
             player2.field[int(instr[1])].abilities[int(instr[2])].effect(origin=player2.field[int(instr[1])],target=player1.field[int(instr[3])],player=player2,loc=(player2.field[int(instr[1])].rect.x,player2.field[int(instr[1])].rect.y))
+        return False
     elif instr[0] == "p": #placed mob
         player2.add_to_field(int(instr[1]),int(instr[2])+1)
+        return False
     elif instr[0] == "g": #game continuing
-        pass
+        return markers["await p2"]
     elif instr[0] == "x": #no available moves, just proceed
-        markers["await p2"]=False
+        return False
     else:
         raise RuntimeError(f"Invalid instructions received: {instr}")
     #print(instr)
@@ -907,8 +941,8 @@ def p2_move(hand:list[Card],field:list[Mob|None],souls:int) -> bytes: #returns a
                 else:
                     result += "m"
                     result += str(field.index(selected_card))
-                    result += selected_card.moveset.index(selected_move)
-                    result += str(choice([i for i in len(player1.field) if player1.field[i] != None]))
+                    result += str(selected_card.moveset.index(selected_move))
+                    result += str(choice([i for i in range(len(player1.field)) if player1.field[i] != None]))
                     break
             elif selected_card in hand:
                 result += "p"
@@ -923,10 +957,10 @@ def p2_move(hand:list[Card],field:list[Mob|None],souls:int) -> bytes: #returns a
                 result += str(hand.index(selected_card))
                 target=choice(selected_card.find_targets())
                 if target in player1.field:
-                    result += player1.field.index(target)
+                    result += str(player1.field.index(target))
                     result += "1"
                 elif target in player2.field:
-                        result += player2.field.index(target)
+                        result += str(player2.field.index(target))
                         result += "2"
                 else:
                     result += "3"
@@ -1028,8 +1062,10 @@ def itm_check(func): #decorator that applies to all items
                 else:
                     result=func(origin=kwargs["origin"],target=card,player=kwargs["player"],original=kwargs["original"])
                 kwargs["item"].uses-=1
-                if kwargs["item"].uses == 0 and kwargs["item"].condition != "when played":
-                    card.remove_item(kwargs["item"])
+        if kwargs["item"].uses <= 0 and (targets == [None] or kwargs["item"].condition == "when played"):
+            kwargs["item"].owned_by.hand.pop(kwargs["item"].owned_by.hand.index(kwargs["item"]))
+        elif kwargs["item"].uses <= 0 and targets != [None]:
+            kwargs["item"].placed_on.remove_item(kwargs["item"])
         return result
     return itm_wrapper
 
@@ -1133,8 +1169,8 @@ def forage(**kwargs) -> Literal[True]: #passive: on this turn
 @itm_check
 def goat_horn_bounce(**kwargs): #item
     if "only_targeting" not in kwargs:
-        player2.hand.append(kwargs["target"].reset())
         player2.field[player2.field.index(kwargs["target"])]=None
+        player2.hand.append(kwargs["target"].reset())
         kwargs["target"].switch_sprite("back")
     else:
         return [kwargs["target"]]
@@ -1450,7 +1486,7 @@ PORT=6543
 effect_sprites={"psn":image.load(r"Assets\psn.png").convert_alpha(),"aquatised":transform.scale(image.load(r"Assets\aquatised.png"),(23,23)).convert()}
 monkey_sprite=transform.scale(image.load(r"Assets\monkey.png"),(840*(window_dim[1]/859),window_dim[1])).convert_alpha()
 subturn_sprites=[transform.scale(image.load(r"Assets\abs_subturn_none.png"),(150,360)).convert_alpha(),transform.scale(image.load(r"Assets\abs_subturn_1.webp"),(150,360)).convert_alpha(),transform.scale(image.load(r"Assets\abs_subturn_2.webp"),(150,360)).convert_alpha(),transform.scale(image.load(r"Assets\abs_subturn_3.png"),(150,360)).convert_alpha()]
-sys.excepthook=excepthook
+#sys.excepthook=excepthook
 game_id=str(int(tm.time()))
 infofile=open(r"Assets\d_info.hex","rb")
 player_infofile=open(r"Assets\p_info.hex","rb")
@@ -1502,6 +1538,10 @@ card_bgs_raw=[file for file in os.scandir(r"Assets\Backs")]
 card_bgs:list[BGTile]=[]
 for i in range(len(card_bgs_raw)):
     card_bgs.append(BGTile(transform.scale(image.load(f"Assets\\Backs\\{card_bgs_raw[i].name}"),card_dim),f"Assets\\Backs\\{card_bgs_raw[i].name}",card_bgs_raw[i].name.split(".")[0].capitalize(),(50+(card_dim[0]+50)*(i%8),100+(card_dim[1]+75)*(i//3))))
+thinking=transform.scale(image.load(r"Assets\thinking.png"),(50,50)).convert_alpha()
+thinking_progress=0
+#ai_delay=lambda: randint(1,5)
+ai_delay=lambda: 0.5
 #endregion
 
 #region variables
@@ -1545,44 +1585,45 @@ name_changing=False
 subsetting=None
 chosen_card_bg=playerjson["chosen card bg"]
 cardback=transform.scale(image.load(f"Assets\\Backs\\{chosen_card_bg.lower()}.png"),card_dim).convert_alpha()
+ai_wait_until=0
 #endregion
 
 #region card definitions
 #Note: cards for deck use are defined by deckbuilder(), which takes these strings and eval()s them into objects
 #This is so each deck entry has a separate memory value
 deck_plc=Item("Deck Placeholder",0,None,transform.rotate(cardback,90),(100,262),transform.rotate(cardback,90),None,card_dim_rot,'',None,None)
-whole_field=Item("THE ENTIRE FIELD!!!",0,nofunction_item,r"Sprites\Whole Field.png",(fields_anchor[0],fields_anchor[1]),r"Sprites\Whole Field.png","pink",(3*cut_dim[0]+3*card_spacing_x,2*cut_dim[1]+card_dim_rot[1]+2*card_spacing_y),None,None,None)
+whole_field=Item("THE ENTIRE FIELD!!!",0,nofunction_item,r"Assets\Whole Field.png",(fields_anchor[0],fields_anchor[1]),r"Assets\Whole Field.png","pink",(3*cut_dim[0]+3*card_spacing_x,2*cut_dim[1]+card_dim_rot[1]+2*card_spacing_y),None,None,None)
 preset_dummy=Mob("Dummy",0,999,[],[bite],{},{},"misc","plains","pink",r"Sprites\Dummy.png",(0,0),r"Cut Sprites\Dummy.png",[(987,512,1323,579)])
 axolotl=r'Mob("Axolotl",3,3,[],[bite],{"on death":play_dead},{},"aquatic","ocean","blue",r"Sprites\Axolotl.png",(0,0),r"Cut SPrites\Axolotl.png",[(987,512,1323,579)])'
 bogged=r'Mob("Bogged",3,3,[],[snipe],{"on death":spore},{},"undead","swamp","blue",r"Sprites\Bogged.webp",(0,0),r"Cut Sprites\Bogged.jpg",[(987,522,1323,579)])'
 bread=r'Item("Bread",1,bread_heal,r"Sprites\Bread.png",(0,0),r"Cut Sprites\Bread.png","blue",card_dim,"when played",1,"all healable")'
-cake=r'Item("Cake",2,cake_heal,r"Sprites\Cake.png",(0,0),r"Cut Sprites\Cake.png","blue",card_dim,"when played",1,"player1 field")'
-cow=r'Mob("Cow",3,4,[Ability(1,milk_share,"can be healed")],[rush],{},{},"misc","plains","blue",r"Sprites\Cow.png",(0,0),r"Cut Sprites\Cow.png",[(987,445,1323,502),(987,502,1323,569)])'
+cake=r'Item("Cake",2,cake_heal,r"Sprites\Cake.png",(0,0),r"Cut Sprites\Cake.png","blue",card_dim,"when played",1,"your field")'
+cow=r'Mob("Cow",3,4,[Ability(1,milk_share,"can be healed","Milk Share")],[rush],{},{},"misc","plains","blue",r"Sprites\Cow.png",(0,0),r"Cut Sprites\Cow.png",[(987,445,1323,502),(987,502,1323,569)])'
 chicken=r'Mob("Chicken",1,2,[],[rush],{"on this turn":mystery_egg},{},"misc","plains","blue",r"Sprites\Chicken.png",(0,0),r"Cut Sprites\Chicken.png",[(987,512,1323,579)])'
-creeper=r'Mob("Creeper",2,2,[Ability(0,prime,"player2 field")],[],{},{},"misc","cavern","blue",r"Sprites\Creeper.png",(0,0),r"Cut Sprites\Creeper.png",[(987,445,1323,552)],prime_status=0)'
+creeper=r'Mob("Creeper",2,2,[Ability(0,prime,"player2 field","Prime")],[],{},{},"misc","cavern","blue",r"Sprites\Creeper.png",(0,0),r"Cut Sprites\Creeper.png",[(987,445,1323,552)],prime_status=0)'
 drowned=r'Mob("Drowned",2,4,[],[drown],{},{},"aquatic","ocean","blue",r"Sprites\Drowned.png",(0,0),r"Cut Sprites\Drowned.png",[(987,497,1323,564)])'
 dummy=r'Mob("Dummy",0,999,[],[bite],{},{},"misc","plains","pink",r"Sprites\Dummy.png",(0,0),r"Cut Sprites\Dummy.png",[(987,512,1323,579)])'
 elder=r'Mob("Elder",6,6,[],[warding_laser],{"end of turn":elders_curse},{},"aquatic","ocean","pink",r"Sprites\Elder.png",(0,0),r"Cut Sprites\Elder.png",[(987,522,1323,589)])'
-egg_rain=r'Item("Egg Rain",1,egg_rain_activate,r"Sprites\Egg Rain.png",(0,0),r"Cut Sprites\Egg Rain.png","blue",card_dim,"on attack",1,"player2 field")'
+egg_rain=r'Item("Egg Rain",1,egg_rain_activate,r"Sprites\Egg Rain.png",(0,0),r"Cut Sprites\Egg Rain.png","blue",card_dim,"on attack",1,"opp field")'
 frog=r'Mob("Frog",2,3,[],[tongue_whip],{},{},"aquatic","swamp","blue",r"Sprites\Frog.png",(0,0),r"Cut Sprites\Frog.png",[(987,512,1323,579)])'
 goat_horn=r'Item("Goat Horn",3,goat_horn_bounce,r"Sprites\Goat Horn.png",(0,0),r"Cut Sprites\Goat Horn.png","pink",card_dim,"when played",1,"special: goat horn")'
 guardian=r'Mob("Guardian",4,3,[],[eye_laser],{"on hurt":thorn_body},{},"aquatic","ocean","blue",r"Sprites\Guardian.png",(0,0),r"Cut Sprites\Guardian.png",[(987,502,1323,569)])'
 horse=r'Mob("Horse",4,5,[],[bite],{"special: quick strike":quick_strike},{},"misc","plains","pink",r"Sprites\Horse.png",(0,0),r"Cut Sprites\Horse.png",[(987,512,1323,579)])'
 loot_chest=r'Item("Loot Chest",0,loot_chest_draw,r"Sprites\Loot Chest.png",(0,0),r"Cut Sprites\Loot Chest.png","blue",card_dim,"when played",1,"whole field")'
-milk=r'Item("Milk",2,milk_cleanse,r"Sprites\Milk.png",(0,0),r"Cut Sprites\Milk.png","blue",card_dim,"when played",1,"player1 field")'
+milk=r'Item("Milk",2,milk_cleanse,r"Sprites\Milk.png",(0,0),r"Cut Sprites\Milk.png","blue",card_dim,"when played",1,"your field")'
 muddy_pig=r'Mob("Muddy Pig",2,3,[],[rush],{"on this turn":forage},{},"misc","plains","blue",r"Sprites\Muddy Pig.png",(0,0),r"Cut Sprites\Muddy Pig.png",[(987,512,1323,579)])'
 pufferfish=r'Item("Pufferfish",2,puffer_poison,r"Sprites\Pufferfish.png",(0,0),r"Cut Sprites\Pufferfish.png","blue",card_dim,"when played",1,"whole field")'
-satoru_gojo=r'Mob("Satoru Gojo",9,20,[Ability(0,nah_id_win,"whole field")],[purple],{"on hurt":infinity},{},"misc","plains","pink",r"Sprites\Satoru Gojo.png",(0,0),r"Cut Sprites\Satoru Gojo.png",[(987,502,1323,554),(987,554,1323,614)])'
-sheep=r'Mob("Sheep",3,4,[Ability(0,wool_guard,"can proxy")],[rush],{},{},"misc","plains","blue",r"Sprites\Sheep.png",(0,0),r"Cut Sprites\Sheep.png",[(987,447,1323,499),(987,499,1323,554)])'
-shield=r'Item("shield",2,shield_protect,r"Sprites\Shield.png",(0,0),r"Cut Sprites\Shield.png","blue",card_dim,"on hurt",1,"player1 field")'
+satoru_gojo='Mob("Satoru Gojo",9,20,[Ability(0,nah_id_win,"whole field","Nah, I\'d Win")],[purple],{"on hurt":infinity},{},"misc","plains","pink",r"Sprites\\Satoru Gojo.png",(0,0),r"Cut Sprites\\Satoru Gojo.png",[(987,502,1323,554),(987,554,1323,614)])'
+sheep=r'Mob("Sheep",3,4,[Ability(0,wool_guard,"can proxy","Wool Guard")],[rush],{},{},"misc","plains","blue",r"Sprites\Sheep.png",(0,0),r"Cut Sprites\Sheep.png",[(987,447,1323,499),(987,499,1323,554)])'
+shield=r'Item("shield",2,shield_protect,r"Sprites\Shield.png",(0,0),r"Cut Sprites\Shield.png","blue",card_dim,"on hurt",1,"your field")'
 skeleton=r'Mob("Skeleton",2,3,[],[snipe],{"on hurt":undead},{},"undead","cavern","blue",r"Sprites\Skeleton.png",(0,0),r"Cut Sprites\Skeleton.png",[(987,512,1323,569)])'
 slime=r'Mob("Slime",3,4,[],[squish],{"on death":split},{},"misc","swamp","blue",r"Sprites\Slime.png",(0,0),r"Cut Sprites\Slime.png",[(987,537,1323,609)],rotation=0)'
 spider=r'Mob("Spider",1,2,[],[spider_bite],{},{},"arthropod","cavern","blue",r"Sprites\Spider.png",(0,0),r"Cut Sprites\Spider.png",[(987,512,1323,569)])'
 sunken=r'Mob("Sunken",2,3,[],[snipe],{},{},"aquatic","ocean","blue",r"Sprites\Sunken.png",(0,0),r"Cut Sprites\Sunken.png",[(987,497,1323,554)])'
-sword=r'Item("Sword",1,sword_slash,r"Sprites\Sword.png",(0,0),r"Cut Sprites\Sword.png","blue",card_dim,"on attack",1,"player1 field")'
-toji=r'Mob("Toji",9,20,[Ability(0,monkey,"whole field")],[knife_thing],{"always":child_support_avoider},{},"undead","plains","pink",r"Sprites\Toji.png",(0,0),r"Cut Sprites\Toji.png",[(987,497,1323,554),(987,554,1323,614)])'
-trident=r'Item("Trident",2,trident_stab,r"Sprites\Trident.png",(0,0),r"Cut SPrites\Trident.png","pink",card_dim,"on attack",1,"player1 field")'
-witch=r'Mob("Witch",3,4,[Ability(1,witch_poison,"player2 field"),Ability(1,witch_healing,"player1 field")],[],{"end this turn":self_aid},{},["human"],"swamp","blue",r"Sprites\Witch.png",(0,0),r"Cut Sprites\Witch.png",[(987,497,1323,569),(987,569,1323,639)],poison_count=0,heal_count=0)'
+sword=r'Item("Sword",1,sword_slash,r"Sprites\Sword.png",(0,0),r"Cut Sprites\Sword.png","blue",card_dim,"on attack",1,"your field")'
+toji=r'Mob("Toji",9,20,[Ability(0,monkey,"whole field","Monkey!")],[knife_thing],{"always":child_support_avoider},{},"undead","plains","pink",r"Sprites\Toji.png",(0,0),r"Cut Sprites\Toji.png",[(987,497,1323,554),(987,554,1323,614)])'
+trident=r'Item("Trident",2,trident_stab,r"Sprites\Trident.png",(0,0),r"Cut SPrites\Trident.png","pink",card_dim,"on attack",1,"your field")'
+witch=r'Mob("Witch",3,4,[Ability(1,witch_poison,"player2 field","Poison"),Ability(1,witch_healing,"player1 field","Heal")],[],{"end this turn":self_aid},{},["human"],"swamp","blue",r"Sprites\Witch.png",(0,0),r"Cut Sprites\Witch.png",[(987,497,1323,569),(987,569,1323,639)],poison_count=0,heal_count=0)'
 zombie=r'Mob("Zombie",2,4,[],[bite],{"on hurt":undead},{},"undead","cavern","blue",r"Sprites\Zombie.png",(0,0),r"Cut Sprites\Zombie.png",[(987,512,1323,579)])'
 #Mob()
 #endregion
@@ -1592,7 +1633,6 @@ tiles:list[dict[str,Tile]]=[{all_cut_names[i][j]:Tile(all_cut_names[i][j],all_cu
 d_tiles:dict[str,Tile]={}
 for sub in tiles:
     d_tiles.update(sub)
-decklist:dict[Card,int]={zombie:30,sword:10}
 deck_presets:list[DeckPreset]=[]
 unpack()
 chosen_deck_name=infojson.pop("<chosen>")
@@ -1600,7 +1640,7 @@ for deck in deck_presets:
     if deck.name == chosen_deck_name:
         chosen_deck=deck
 decklist_p1={"mobs":{eval(mob):chosen_deck.original_mobs[mob] for mob in chosen_deck.original_mobs},"items":{eval(item):chosen_deck.original_items[item] for item in chosen_deck.original_items}}
-decklist_p2={"mobs":{bogged:8},"items":{sword:10}}
+decklist_p2={"mobs":{zombie:8},"items":{sword:10}}
 deck_p1 = {"mobs":deckbuilder(decklist_p1["mobs"]),"items":deckbuilder(decklist_p1["items"])}
 deck_p2 = {"mobs":deckbuilder(decklist_p2["mobs"]),"items":deckbuilder(decklist_p2["items"])}
 playername=playerjson["name"]
@@ -1662,11 +1702,13 @@ while running:
         if sock in read_ready:
             sockinfo=sock.recv(1024)
         if sock in write_ready:
-            sock.send(sock_write)
+            sock.send(sock_write.encode())
         if sock in error_ready:
             raise RuntimeError(f"Mom, sockets are acting up again!\n{sock.error}")
-    execute(sockinfo)
-    sockinfo=None
+    temp=execute(sockinfo)
+    if type(temp) == bool:
+        markers["await p2"]=temp
+    sockinfo="g".encode()
     sock_write="g"
 
     for e in event.get():
@@ -1862,7 +1904,7 @@ while running:
                 for card in player2.hand:
                     if card.rect.collidepoint(pos) and card.current_sprite != card.back_sprite:
                         selected=card
-                if move_hovering_over != None:
+                if move_hovering_over != None and not True in [card.rect.collidepoint(mouse.get_pos()) for card in player1.hand]:
                     if type(selected) == Mob and move_hovering_over[0].collidepoint(pos) and player1.field.index(selected) == subturn-1:
                         selected_move=move_hovering_over[1]
                         if type(selected_move) != Ability:
@@ -1887,6 +1929,10 @@ while running:
                             if setup == True:
                                 abs_subturn += 1
                                 abs_abs_subturn += 1
+                                markers["start of move called"]=False
+                            else:
+                                ai_wait_until=tm.time()+ai_delay()
+                                markers["await p2"]=True
                         else:
                             if markers["not enough souls"][0] == 0 and min(hand_cost) >= player1.souls:
                                 markers["not enough souls"]=[6,5,0,0] #[amount of cycles,frames per cycle,current colour,frame number]
@@ -1925,6 +1971,8 @@ while running:
                                 if postsubturn == 1 and setup == False:
                                     abs_subturn += 1
                                     abs_abs_subturn += 1
+                                    ai_wait_until=tm.time()+ai_delay()
+                                    markers["await p2"]=True
                                     markers["start of move called"]=False
                                 if abs_abs_subturn != 3:
                                     selected = player1.field[abs_subturn%len(filled_positions)]
@@ -1955,19 +2003,21 @@ while running:
                                 if until_end == 0:
                                     if player1.field[subturn-1] != None:
                                         if "end this turn" in player1.field[subturn-1].passives:
-                                            player1.field[subturn-1].passives["end this turn"](origin=player1.field[subturn-1],player=player1)
+                                            player1.field[subturn-1].passives["end this turn"](origin=player1.field[subturn-1],player=player1,loc=(player1.field[subturn-1].rect.x,player1.field[subturn-1].rect.y))
                                         if player1.field[subturn-1].status["psn"] > 0:
                                             player1.field[subturn-1].hurt(1,"psn")
                                             player1.field[subturn-1].status["psn"] -= 1
                                     if player2.field[subturn-1] != None:
                                         if "end this turn" in player2.field[subturn-1].passives:
-                                            player2.field[subturn-1].passives["end this turn"](origin=player2.field[subturn-1],player=player2)
+                                            player2.field[subturn-1].passives["end this turn"](origin=player2.field[subturn-1],player=player2,loc=(player2.field[subturn-1].rect.x,player2.field[subturn-1].rect.y))
                                         if player2.field[subturn-1].status["psn"] > 0:
                                             player2.field[subturn-1].hurt(1,"psn")
                                             player2.field[subturn-1].status["psn"] -= 1
                                     if postsubturn == 1 and setup == False:
                                         abs_subturn += 1
                                         abs_abs_subturn += 1
+                                        ai_wait_until=tm.time()+ai_delay()
+                                        markers["await p2"]=True
                                         markers["start of move called"]=False
                                     if abs_abs_subturn != 3:
                                         selected = player1.field[abs_subturn%len(filled_positions)]
@@ -2045,6 +2095,8 @@ while running:
             if e.key==K_p:
                 print(str(mouse.get_pos()))
                 coord_tooltip= not coord_tooltip
+            elif e.key == K_n:
+                execute(p2_move(player2.hand,player2.field,player2.souls))
             if connect_state == "connecting":
                 if e.key == K_BACKSPACE:
                     HOST = HOST[:-1]
@@ -2280,13 +2332,13 @@ while running:
                 draw.rect(screen,(255,255,255),Rect(temp.centerx-20,temp.centery-5,40,10))
                 draw.rect(screen,(255,255,255),Rect(temp.centerx-5,temp.centery-20,10,40))
         if markers["finishable"] and setup == False and not markers["game over called"]:
-            if player1.field == [None, None, None]:
+            if player1.field == [None, None, None] or markers["concede"] == "you":
                 state = "lose"
                 markers["freeze"]=True
                 markers["fade"]=[60,[0,0,0],255,0,0] #duration in frames, final colour, final transparency, current transparency, transparency change per frame
                 markers["game over called"]=True
                 markers["fade"][4]=markers["fade"][2]/markers["fade"][0]
-            if player2.field == [None, None, None]:
+            if player2.field == [None, None, None] or markers["concede"] == "opp":
                 state = "win"
                 markers["freeze"]=True
                 markers["fade"]=[60,[10,140,50],255,0,0]
@@ -2306,6 +2358,8 @@ while running:
         temps.set_alpha(markers["fade"][3])
         temps.fill(markers["fade"][1])
         screen.blit(temps,(0,0))
+        markers["await p2"]=False
+        ai_wait_until=0
     if setup == False:
         if state == "lose":
             if markers["fade"][0] <= 0:
@@ -2380,10 +2434,19 @@ while running:
     else:
         disconnect_cd=600
     if disconnect_cd == 0:
-        state="lose"
+        state="win"
         setup=False
-        markers["concede"]="you"
-        sock_write='c'
+        markers["concede"]="opp"
+    if tm.time() >= ai_wait_until and markers["await p2"] and markers["do not connect"]:
+        temp=execute(p2_move(player2.hand,player2.field,player2.souls))
+        if type(temp) == bool:
+            markers["await p2"]=temp
+    if markers["await p2"]:
+        thinking_progress+=4
+        thinking_rot=transform.rotate(thinking,thinking_progress)
+        screen.blit(thinking_rot,thinking_rot.get_rect(center=(870,75)))
+    else:
+        thinking_progress=0
     display.update()
     clock.tick(FPS)
 
@@ -2394,15 +2457,13 @@ while running:
     3. Get item stealing to work
     4. HOLD: Don't constantly load images, only do it when selected changes
     5. HOLD: Implement setting colour for decks
-    6. Some semblance of player 2 AI (so people can play before i get co-op figured out)
-    7. execute() function to interpret and execute text-based instructions, used by player2 AI (maybe) and co-op communication (definitely)
-    8. Instance communication format
-    9. Items and hand cards start compressing if there are too many
-    10. Write docs (already feeling the effects of no docs)
+    6. Items and hand cards start compressing if there are too many
+    7. Write docs (already feeling the effects of no docs)
+    8. Might need to flip player 1 and 2 in execute() (since from the opponent's perspective, they are player 1 and you are player 2, but from your perspective its flipped)
+    9. Change ability activating system to call Ability instead, so a proper name instead of a cheesed one can be displayed
 
     Bugs:
-    1. FPS drop when game end screen comes into full opacity
-    2. Colour wheel png is not actually transparent
-    3. Items are messed up (again)
-    4. Egg rain does not work for abilities
+    1. Colour wheel png is not actually transparent
+    2. Items in the deck screen are messed up (again)
+    3. Egg rain does not work for abilities
     '''
