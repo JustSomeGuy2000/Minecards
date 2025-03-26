@@ -549,6 +549,7 @@ class DeckPreset(): #this gets confusing fast so I'll be leaving some comments
         self.colour=colour
         self.original_mobs:dict[str,int]=mobs #strings are names of the variables that represent mobs, supposed to be evaled
         self.original_items:dict[str,int]=items
+        self.item_offset=0
         self.set_rects()
         self.title_bg_rect=Rect(10,10,window_dim[0]-20,88)
         self.text=large_font.render(name,True,contrast(colour))
@@ -556,7 +557,6 @@ class DeckPreset(): #this gets confusing fast so I'll be leaving some comments
         self.info_text=None
         self.plus1_text=None
         self.minus1_text=None
-        self.item_offset=0
         self.pink_mob=False
         self.pink_item=False
         usable=False
@@ -583,19 +583,18 @@ class DeckPreset(): #this gets confusing fast so I'll be leaving some comments
             screen.blit(deck_mobs_text,(10,110))
             screen.blit(mjgs.render(f"{sum(list(self.original_mobs.values()))}/8",True,(0,0,0)),(200,110))
             screen.blit(deck_items_text,(10,380))
-            screen.blit(mjgs.render(f"{sum(list(self.original_items.values()))}/10",True,(0,0,0)),(200,380))
+            screen.blit(mjgs.render(f"{sum(list(self.original_items.values()))}/10",True,(0,0,0)),(250,380))
             for mob in list(self.mobs.keys()):
                 if selected == mob:
                     draw.rect(screen,(255,255,255),Rect(mob.rect.x-5,mob.rect.y-5,cut_dim[0]+10,cut_dim[1]+10))
                 screen.blit(mob.cut_sprite,mob.rect)
                 screen.blit(mjgs.render(f"x{self.mobs[mob]}",True,(0,0,0)),(mob.rect.x+(cut_dim[0]/2-mjgs.size(f"x{self.mobs[mob]}")[0]/2),mob.rect.y+cut_dim[1]+10))
-            for i in range(min(len(self.items),8)):
-                i=min(i+self.item_offset,len(self.items)-1)
+            for i in range(len(self.items)):
                 item=list(self.items.keys())[i]
                 if selected == item:
                     draw.rect(screen,(255,255,255),Rect(item.rect.x-5,item.rect.y-5,cut_dim[0]+10,cut_dim[1]+10))
-                screen.blit(item.cut_sprite,(item.rect.x-(cut_dim[0]+20)*self.item_offset,item.rect.y))
-                screen.blit(mjgs.render(f"x{self.items[item]}",True,(0,0,0)),(item.rect.x+(cut_dim[0]/2-mjgs.size(f"x{self.items[item]}")[0]/2)-(cut_dim[0]+20)*self.item_offset,item.rect.y+cut_dim[1]+10))
+                screen.blit(item.cut_sprite,(item.rect.x,item.rect.y))
+                screen.blit(mjgs.render(f"x{self.items[item]}",True,(0,0,0)),(item.rect.x+(cut_dim[0]/2-mjgs.size(f"x{self.items[item]}")[0]/2),item.rect.y+cut_dim[1]+10))
             if self.item_offset > 0:
                 draw.circle(screen,M_BLUE,(items_left[1].x+20,items_left[1].y+20),25)
                 screen.blit(items_left[0],items_left[1])
@@ -649,12 +648,12 @@ class DeckPreset(): #this gets confusing fast so I'll be leaving some comments
                 temp=True
         elif self.plus1_text.textrect.collidepoint(pos):
             if selected in self.mobs and sum(list(self.original_mobs.values())) < 8 and ((selected.border == "pink" and self.pink_mob == False) or selected.border == "blue"):
-                self.original_mobs[list(self.original_mobs.keys())[list(self.mobs.keys()).index(selected)+self.item_offset]]+=1
+                self.original_mobs[list(self.original_mobs.keys())[list(self.mobs.keys()).index(selected)]]+=1
                 if selected.border == "pink":
                     self.pink_mob = True
                 temp=True
             elif selected in self.items and sum(list(self.original_items.values())) < 10 and ((selected.border == "pink" and self.pink_mob == False) or selected.border == "blue"):
-                self.original_items[list(self.original_items.keys())[list(self.items.keys()).index(selected)+self.item_offset]]+=1
+                self.original_items[list(self.original_items.keys())[list(self.items.keys()).index(selected)]]+=1
                 if selected.border == "pink":
                     self.pink_item = True
                 temp=True
@@ -668,9 +667,9 @@ class DeckPreset(): #this gets confusing fast so I'll be leaving some comments
                     temp2=True
                 temp=True
             elif selected in self.items:
-                self.original_items[list(self.original_items.keys())[list(self.items.keys()).index(selected)+self.item_offset]]-=1
-                if self.original_items[list(self.original_items.keys())[list(self.items.keys()).index(selected)+self.item_offset]] == 0:
-                    self.original_items.pop(list(self.original_items.keys())[list(self.items.keys()).index(selected)+self.item_offset])
+                self.original_items[list(self.original_items.keys())[list(self.items.keys()).index(selected)]]-=1
+                if self.original_items[list(self.original_items.keys())[list(self.items.keys()).index(selected)]] == 0:
+                    self.original_items.pop(list(self.original_items.keys())[list(self.items.keys()).index(selected)])
                     if selected.border == "pink":
                         self.pink_item = False
                     temp2=True
@@ -687,8 +686,12 @@ class DeckPreset(): #this gets confusing fast so I'll be leaving some comments
         global menu_deck_selected_text
         if items_left[1].collidepoint(pos) and self.item_offset > 0:
             self.item_offset -= 1
+            for item in list(self.items.keys()):
+                item.rect.x += (cut_dim[0]+20)
         elif items_right[1].collidepoint(pos) and sum(list(self.items.values())) > 8 and not 8+self.item_offset == sum(list(self.items.values())):
             self.item_offset += 1
+            for item in list(self.items.keys()):
+                item.rect.x -= (cut_dim[0]+20)
         elif select_deck_text.textrect.collidepoint(pos):
             if self.usable == True:
                 chosen_deck=self
@@ -720,7 +723,7 @@ class DeckPreset(): #this gets confusing fast so I'll be leaving some comments
         self.text=large_font.render(self.name,True,contrast(self.colour))
     
     def unpack(self,mobs:dict[str,int],items:dict[str,int],targettype:Literal["blacklist"]|Literal["whitelist"]="all",targets:list=[]):
-        target_list=["mobs","items","mob_rects","item_rects","mob_tiles","item_tiles","mob_infos","item_infos","pinks"]
+        target_list=["mobs","items","pinks"]
         if targettype == "blacklist":
             target_list=[var for var in target_list if var not in targets]
         elif targettype == "whitelist":
@@ -728,7 +731,7 @@ class DeckPreset(): #this gets confusing fast so I'll be leaving some comments
         if "mobs" in target_list:
             self.mobs:dict[Tile,int]={d_tiles[x].nearcopy(position=(deck_cards_pos[list(mobs.keys()).index(x)],160)):mobs[x] for x in list(mobs.keys())} #strings are those that represent the card info that can be evaled into card objects, ints are amounts
         if "items" in target_list:
-            self.items:dict[Tile,int]={d_tiles[x].nearcopy(position=(deck_cards_pos[list(items.keys()).index(x)],430)):items[x] for x in list(items.keys())}
+            self.items:dict[Tile,int]={d_tiles[x].nearcopy(position=(deck_cards_pos[list(items.keys()).index(x)]-(cut_dim[0]+20)*self.item_offset,430)):items[x] for x in list(items.keys())}
         if "pinks" in target_list:
             self.pink_mob=False
             self.pink_item=False
@@ -1481,6 +1484,8 @@ card_spacing_y=50
 y_rails=[fields_anchor[1],fields_anchor[1]+card_spacing_y*2+card_dim_rot[1]+cut_dim[1]]
 x_rails=[fields_anchor[0],fields_anchor[0]+cut_dim[0]+card_spacing_x,fields_anchor[0]+cut_dim[0]*2+card_spacing_x*2]
 hearts_rails=[y_rails[0]+cut_dim[0]+10,y_rails[1]-10-20] #0: player 2, 1: player 1
+large_image_pos = (930,100)
+deck_plc_pos = (100,262)
 game_overs=("win", "tie", "lose")
 PORT=6543
 effect_sprites={"psn":image.load(r"Assets\psn.png").convert_alpha(),"aquatised":transform.scale(image.load(r"Assets\aquatised.png"),(23,23)).convert()}
@@ -1537,9 +1542,9 @@ settings_button:tuple[Surface,Rect]=(transform.scale(image.load(r"Assets\setting
 card_bgs_raw=[file for file in os.scandir(r"Assets\Backs")]
 card_bgs:list[BGTile]=[]
 for i in range(len(card_bgs_raw)):
-    card_bgs.append(BGTile(transform.scale(image.load(f"Assets\\Backs\\{card_bgs_raw[i].name}"),card_dim),f"Assets\\Backs\\{card_bgs_raw[i].name}",card_bgs_raw[i].name.split(".")[0].capitalize(),(50+(card_dim[0]+50)*(i%8),100+(card_dim[1]+75)*(i//3))))
+    card_bgs.append(BGTile(transform.scale(image.load(f"Assets\\Backs\\{card_bgs_raw[i].name}"),card_dim),f"Assets\\Backs\\{card_bgs_raw[i].name}",card_bgs_raw[i].name.split(".")[0].capitalize(),(50+(card_dim[0]+50)*(i%8),100+(card_dim[1]+75)*(i//8))))
 thinking=transform.scale(image.load(r"Assets\thinking.png"),(50,50)).convert_alpha()
-thinking_progress=0
+thinking_progress:int=0
 #ai_delay=lambda: randint(1,5)
 ai_delay=lambda: 0.5
 #endregion
@@ -1585,13 +1590,13 @@ name_changing=False
 subsetting=None
 chosen_card_bg=playerjson["chosen card bg"]
 cardback=transform.scale(image.load(f"Assets\\Backs\\{chosen_card_bg.lower()}.png"),card_dim).convert_alpha()
-ai_wait_until=0
+ai_wait_until:float|int=0
 #endregion
 
 #region card definitions
 #Note: cards for deck use are defined by deckbuilder(), which takes these strings and eval()s them into objects
 #This is so each deck entry has a separate memory value
-deck_plc=Item("Deck Placeholder",0,None,transform.rotate(cardback,90),(100,262),transform.rotate(cardback,90),None,card_dim_rot,'',None,None)
+deck_plc=Item("Deck Placeholder",0,None,transform.rotate(cardback,90),deck_plc_pos,transform.rotate(cardback,90),None,card_dim_rot,'',None,None)
 whole_field=Item("THE ENTIRE FIELD!!!",0,nofunction_item,r"Assets\Whole Field.png",(fields_anchor[0],fields_anchor[1]),r"Assets\Whole Field.png","pink",(3*cut_dim[0]+3*card_spacing_x,2*cut_dim[1]+card_dim_rot[1]+2*card_spacing_y),None,None,None)
 preset_dummy=Mob("Dummy",0,999,[],[bite],{},{},"misc","plains","pink",r"Sprites\Dummy.png",(0,0),r"Cut Sprites\Dummy.png",[(987,512,1323,579)])
 axolotl=r'Mob("Axolotl",3,3,[],[bite],{"on death":play_dead},{},"aquatic","ocean","blue",r"Sprites\Axolotl.png",(0,0),r"Cut SPrites\Axolotl.png",[(987,512,1323,579)])'
@@ -1768,7 +1773,7 @@ while running:
                     markers["concede"]="you"
                     setup=False
                     state="lose"
-                elif last_screen == "menu":
+                elif last_screen == "menu" and subsetting == None:
                     if to_profile_text.textrect.collidepoint(pos):
                         subsetting="profile"
                     elif to_bg_cstm_text.textrect.collidepoint(pos):
@@ -1778,12 +1783,12 @@ while running:
                     elif subsetting == "profile":
                         if name_change_text.textrect.collidepoint(pos):
                             name_changing=True
-                    elif subsetting == "cardbg":
-                        for bg in card_bgs:
-                            if bg.rect.collidepoint(pos):
-                                chosen_card_bg=bg.name
-                                cardback=transform.scale(image.load(bg.path),card_dim).convert_alpha()
-                                deck_plc.current_sprite=transform.rotate(cardback,90)
+                elif subsetting == "cardbg":
+                    for bg in card_bgs:
+                        if bg.rect.collidepoint(pos):
+                            chosen_card_bg=bg.name
+                            cardback=transform.scale(image.load(bg.path),card_dim).convert_alpha()
+                            deck_plc.current_sprite=transform.rotate(cardback,90)
 
             elif state == "deck screen":
                 if decks_to_menu_text.textrect.collidepoint(pos):
@@ -2213,7 +2218,7 @@ while running:
                         selected_deck.set_renders(mob.rect)
                         temp=True
                 for item in selected_deck.items:
-                    if item.rect.collidepoint(mouse.get_pos()) and list(selected_deck.items.keys()).index(item) >= selected_deck.item_offset and list(selected_deck.items.keys()).index(item) <= selected_deck.item_offset+7:
+                    if item.rect.collidepoint(mouse.get_pos()):
                         selected=item
                         selected_deck.set_renders(item.rect)
                         temp=True
@@ -2262,7 +2267,7 @@ while running:
         if selected != None:
             large_image=transform.scale(image.load(selected.original_sprite),(card_dim[0]*3,card_dim[1]*3)).convert()
             draw.rect(screen,ORANGE,Rect(selected.rect.x-5,selected.rect.y-5,selected.rect.width+10,selected.rect.height+10),5)
-            screen.blit(large_image,(930,100))
+            screen.blit(large_image,large_image_pos)
         for i in range(3):
             if player1.field[i] == None and type(selected) != Item and selected in player1.hand:
                 temp=Rect(player1.field_pos[i],cut_dim)
@@ -2310,6 +2315,8 @@ while running:
             abs_abs_subturn=0
             player1.souls=1
             player2.souls=1
+            draw_card(player1,deck_p1["items"],drawing_cards)
+            draw_card(player2,deck_p2["items"],drawing_cards)
         filled_positions={}
         for i in range(len(player1.field)):
             if player1.field[i] != None:
@@ -2461,9 +2468,10 @@ while running:
     7. Write docs (already feeling the effects of no docs)
     8. Might need to flip player 1 and 2 in execute() (since from the opponent's perspective, they are player 1 and you are player 2, but from your perspective its flipped)
     9. Change ability activating system to call Ability instead, so a proper name instead of a cheesed one can be displayed
+    10. Lose on deck out, or maybe after a turn timer ends (timer starts on deck out)
+    11. Add card draw info to communication format (since both players have different decks)
 
     Bugs:
     1. Colour wheel png is not actually transparent
-    2. Items in the deck screen are messed up (again)
-    3. Egg rain does not work for abilities
+    2. Egg rain does not work for abilities
     '''
