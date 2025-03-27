@@ -45,7 +45,7 @@ class Mob(sprite.Sprite):
         self.moveset=attacks #attacks
         self.move_positions:list[Rect]=[]
         for position in move_positions:
-            self.move_positions.append(Rect(position[0],position[1],position[2]-position[0],position[3]-position[1]))#hitboxes of moves, in order
+            self.move_positions.append(Rect(position[0]+large_image_pos[0],position[1]+large_image_pos[1],position[2]-position[0],position[3]-position[1]))#hitboxes of moves, in order
         self.items=items
         self.mob_class=mob_class
         self.biome=biome
@@ -130,15 +130,6 @@ class Mob(sprite.Sprite):
         elif self.rot[0] != 0:
             self.rot_sprite=transform.rotate(self.current_sprite,self.rot[1]/self.rot[0]*self.rot[2])
             self.rot[2]+=1
-        for position in self.move_positions:
-            if selected == self and position.collidepoint(mouse.get_pos()) and not attack_progressing and self == player1.field[subturn-1] and setup == False:
-                draw.rect(screen,ORANGE,position,5)
-                if self.move_positions.index(position) < len(self.moveset):
-                    move_hovering_over=(position,self.moveset[self.move_positions.index(position)])
-                else:
-                    move_hovering_over=(position,self.abilities[self.move_positions.index(position)-len(self.moveset)])
-        if attack_progressing:
-            draw.rect(screen,ORANGE,move_hovering_over[0],5)
         self.rect.x, self.rect.y=int(self.internal_coords[0]), int(self.internal_coords[1])
         if self.rot[2] != self.rot[0]:
             screen.blit(self.rot_sprite,(self.rect.x,self.rect.y))
@@ -255,7 +246,7 @@ class Item(sprite.Sprite):
         self.rect=self.current_sprite.get_rect()
         self.rect.x=init_pos[0]
         self.rect.y=init_pos[1]
-        self.display_rect=Rect(930,100,card_dim[0]*3,card_dim[1]*3)
+        self.display_rect=Rect(large_image_pos[0],large_image_pos[1],card_dim[0]*3,card_dim[1]*3)
         self.internal_coords=list(init_pos)
         #MOVEMENT
         self.timer=0
@@ -301,12 +292,6 @@ class Item(sprite.Sprite):
             self.destinations=[]
             self.times=[]
             self.movement_phase=0
-        if attack_progressing and selected == self:
-            draw.rect(screen,ORANGE,Rect(self.display_rect.left-5,self.display_rect.top-5,self.display_rect.width,self.display_rect.height),5)
-        if selected == self and self.display_rect.collidepoint(mouse.get_pos()) and not attack_progressing:
-            if not True in [card.rect.collidepoint(mouse.get_pos()) for card in player1.hand]:
-                draw.rect(screen,ORANGE,Rect(self.display_rect.left-5,self.display_rect.top-5,self.display_rect.width,self.display_rect.height),5)
-                move_hovering_over=(self.display_rect,self.effect)
         self.rect.x, self.rect.y=int(self.internal_coords[0]),int(self.internal_coords[1])
         screen.blit(self.current_sprite, (self.rect.x,self.rect.y))
 
@@ -378,8 +363,13 @@ class Player():
         for i in range(len(self.hand)):
             if self.player_number==2:
                 self.hand[i].switch_sprite("back")
-            if self.hand[i].destinations == []:
-                self.hand[i].internal_coords[1], self.hand[i].internal_coords[0]= (self.hand_pos[1],self.hand_pos[0]+card_dim[0]*i)
+            if self.hand[i].destinations == []: # hand_pos x is the same as field_anchor x
+                if hand_fill_type == "left":
+                    self.hand[i].internal_coords[1], self.hand[i].internal_coords[0]= (self.hand_pos[1],self.hand_pos[0]+card_dim[0]*i)
+                elif hand_fill_type == "right":
+                    self.hand[i].internal_coords[1], self.hand[i].internal_coords[0]= (self.hand_pos[1],self.hand_pos[0]-card_dim[0]*i)
+                elif hand_fill_type == "centre":
+                    self.hand[i].internal_coords[1], self.hand[i].internal_coords[0]= (self.hand_pos[1],self.hand_pos[0]+(card_dim[0]*i)-(len(self.hand)*cut_dim[0])/2)
             self.hand[i].update()
             #display cards
         for card in self.field:
@@ -467,6 +457,7 @@ class Player():
 class ClickableText():
     def __init__(self,font:font.Font,text:str,colour:tuple[int,int,int],position:Coord):
         self.text=font.render(text,True,colour)
+        self.raw_text=text
         self.textrect=self.text.get_rect()
         self.position=position
         self.textrect.x=position[0]
@@ -762,6 +753,34 @@ class BGTile(): #a container for background changing information
         screen.blit(self.img,self.pos)
         screen.blit(self.text,self.textpos)
 
+class LayoutTile(): # a container for game layout information
+    def __init__(self,name:str,text:Surface,field_anchor:Coord,x_spacing:int,y_spacing:int,large_img_pos:Coord,dck_plc_pos:Coord,display_pos:Coord,lrg_hideable:bool,hand_fill:Literal["left"]|Literal["right"]|Literal["centre"],sbt_indic_pos:Coord,hand_anchor:Coord=None,img:Surface=Surface((0,0))):
+        self.name=name
+        self.text=text
+        self.field_anchor=field_anchor
+        if hand_anchor == None:
+            self.hand_anchor=self.field_anchor
+        else:
+            self.hand_anchor=hand_anchor
+        self.x_spacing=x_spacing
+        self.y_spacing=y_spacing
+        self.large_image_pos=large_img_pos
+        self.deck_plc_pos=dck_plc_pos
+        self.large_hideable=lrg_hideable
+        self.img=img
+        self.display_pos=display_pos
+        self.hand_fill_type=hand_fill
+        self.subturn_indic_pos=sbt_indic_pos
+        self.display_surf=Surface((self.text.get_rect().width+30+self.img.get_rect().width,max(self.text.get_rect().height,self.img.get_rect().height)),SRCALPHA,32).convert_alpha()
+        self.display_surf.blit(self.text,(0,self.img.get_rect().height/2-self.text.get_height()/2))
+        self.display_surf.blit(self.img,(self.text.get_rect().width+30,0))
+        self.rect=self.display_surf.get_rect(left=self.display_pos[0],top=self.display_pos[1])
+
+    def display(self):
+        screen.blit(self.display_surf,self.rect)
+        if chosen_layout_name == self.name:
+            draw.rect(screen,ORANGE,Rect(self.rect.x-10,self.rect.y-10,self.rect.width+20,self.rect.height+20),10)
+
 def excepthook(type, value, traceback):
     print(f"Error: {type.__name__}\nReason: {value}\nTraceback :\n{str(t.format_tb(traceback))}")
     name="crashes\\crash_log_"+str(tm.time())+".txt"
@@ -808,8 +827,14 @@ def draw_card(player:Player,draw_from:dict[Card,int],amount:int=1,override=None)
             card=override
         player.hand.append(card)
         card_list.append(card)
-        card.internal_coords=[100,262]
+        card.internal_coords=list(deck_plc_pos)
         card.startmove([(player.hand_pos[0]+card_dim[0]*(len(player.hand)-1),player.hand_pos[1])],[30])
+        if hand_fill_type == "left":
+            card.startmove([(player.hand_pos[1],player.hand_pos[0]+card_dim[0]*(len(player.hand)-1))],[30])
+        elif hand_fill_type == "right":
+            card.startmove([(player.hand_pos[1],player.hand_pos[0]-card_dim[0]*(len(player.hand)-1))],[30])
+        elif hand_fill_type == "centre":
+            card.startmove([(player.hand_pos[1],player.hand_pos[0]+(card_dim[0]*(len(player.hand)-1))-(len(player.hand)*cut_dim[0])/2)],[30])
         card.owned_by=player
     if len(card_list) == 1:
         return card_list[0]
@@ -1142,8 +1167,10 @@ def elders_curse(**kwargs) -> Literal[True]: #passive: end of turn
     global attack_progressing
     global move_hovering_over
     global targets
+    global hide_large
     if kwargs["player"] == player1 and kwargs["origin"] in player1.field:
         selected=kwargs["origin"]
+        hide_large=False
         selected_move=kwargs["origin"].moveset[0]
         attack_progressing=True
         move_hovering_over=(kwargs["origin"].move_positions[0],kwargs["origin"].moveset[0])
@@ -1379,6 +1406,7 @@ def tongue_whip(**kwargs) -> tuple[Literal[True],int]: #attack
     global selected
     global targets
     global markers
+    global hide_large
     dmg=0
     if kwargs["noattack"] == False:
         dmg=1
@@ -1391,6 +1419,7 @@ def tongue_whip(**kwargs) -> tuple[Literal[True],int]: #attack
             until_end += 3
             targets = kwargs["target"].items
             selected=kwargs["origin"]
+            hide_large=False
             markers["item stealing"]=(True, kwargs["origin"])
     return True, dmg
 
@@ -1462,6 +1491,13 @@ def wool_guard(**kwargs) -> tuple[Literal[True],Literal["break"]]|None: #ability
 #endregion
 
 #region constants
+infofile=open(r"Assets\d_info.hex","rb")
+player_infofile=open(r"Assets\p_info.hex","rb")
+infojson:dict[str,dict]=json.loads(b.unhexlify(infofile.read()))
+playerjson:dict[str,dict]=json.loads(b.unhexlify(player_infofile.read()))
+layouts=[LayoutTile("partitioned",mjgs.render("Partitioned",True,(0,0,0)),(90,40),70,50,(930,10),(100,262),(window_dim[0]/2-mjgs.size("Partitioned")[0]/2-160,200),False,"left",(760,210),None,transform.scale(image.load(r"Assets\partitioned_preview.png"),(300,176)).convert()),LayoutTile("centred",mjgs.render("Centred",True,(0,0,0)),(400,140),90,0,(500,100),(1200,330),(window_dim[0]/2-mjgs.size("Centred")[0]/2-160,500),True,"centre",(80,250),[(730,683),(730,-100)],transform.scale(image.load(r"Assets\centred_preview.png"),(300,176)).convert())]
+chosen_layout_name:str=playerjson["layout"]
+chosen_layout=layouts[[layout.name for layout in layouts].index(chosen_layout_name)]
 title_img=transform.scale(image.load(r"Assets\title.png"),(842,120)).convert_alpha()
 card_dim=(150,225)
 card_dim_rot=(225,150)
@@ -1478,14 +1514,19 @@ drawing_cards=2
 background=transform.scale(image.load(r"Assets\background.png"),window_dim).convert()
 FPS=60
 clock=time.Clock()
-fields_anchor=(90,40)
-card_spacing_x=70
-card_spacing_y=50
+fields_anchor=chosen_layout.field_anchor
+card_spacing_x=chosen_layout.x_spacing
+card_spacing_y=chosen_layout.y_spacing
 y_rails=[fields_anchor[1],fields_anchor[1]+card_spacing_y*2+card_dim_rot[1]+cut_dim[1]]
 x_rails=[fields_anchor[0],fields_anchor[0]+cut_dim[0]+card_spacing_x,fields_anchor[0]+cut_dim[0]*2+card_spacing_x*2]
 hearts_rails=[y_rails[0]+cut_dim[0]+10,y_rails[1]-10-20] #0: player 2, 1: player 1
-large_image_pos = (930,100)
-deck_plc_pos = (100,262)
+if chosen_layout.hand_anchor == chosen_layout.field_anchor:
+    hand_anchors=[(fields_anchor[0],y_rails[1]+cut_dim[1]+card_spacing_y),(fields_anchor[0],fields_anchor[1]/2-card_dim[1]+10)]
+else:
+    hand_anchors=chosen_layout.hand_anchor
+large_image_pos = chosen_layout.large_image_pos
+deck_plc_pos = chosen_layout.deck_plc_pos
+subturn_indic_pos = chosen_layout.subturn_indic_pos
 game_overs=("win", "tie", "lose")
 PORT=6543
 effect_sprites={"psn":image.load(r"Assets\psn.png").convert_alpha(),"aquatised":transform.scale(image.load(r"Assets\aquatised.png"),(23,23)).convert()}
@@ -1493,8 +1534,6 @@ monkey_sprite=transform.scale(image.load(r"Assets\monkey.png"),(840*(window_dim[
 subturn_sprites=[transform.scale(image.load(r"Assets\abs_subturn_none.png"),(150,360)).convert_alpha(),transform.scale(image.load(r"Assets\abs_subturn_1.webp"),(150,360)).convert_alpha(),transform.scale(image.load(r"Assets\abs_subturn_2.webp"),(150,360)).convert_alpha(),transform.scale(image.load(r"Assets\abs_subturn_3.png"),(150,360)).convert_alpha()]
 #sys.excepthook=excepthook
 game_id=str(int(tm.time()))
-infofile=open(r"Assets\d_info.hex","rb")
-player_infofile=open(r"Assets\p_info.hex","rb")
 colour_wheel=transform.scale(image.load(r"Assets\colour_wheel.png").convert_alpha(),(70,70))
 colour_wheel_rect=Rect(window_dim[0]-90,20,70,70)
 cards_sidebar_button=transform.scale(image.load(r"Assets\cards_sidebar.png"),(70,70)).convert_alpha()
@@ -1563,7 +1602,7 @@ postsubturn=1 #postsubturn numbers start from 2
 attack_choosing_state=False
 HOST=''
 sock:socket.socket=''
-markers={"retry":False, "deck built":False, "do not connect":True, "start of turn called":False, "not enough souls":[0,0,0,0], "data received, proceed":False, "just chose":False, "finishable":True, "freeze":False, "fade":[0,[0,0,0],0,0,0], "game over called":False,"start of move called":False,"item stealing":(False, None),"forage":False,"monkey":0,"until end just changed":False,"concede":None,"await p2":False,"disconnecting":False}
+markers={"retry":False, "deck built":False, "do not connect":True, "start of turn called":False, "not enough souls":[0,0,0,0], "data received, proceed":False, "just chose":False, "finishable":True, "freeze":False, "fade":[0,[0,0,0],0,0,0], "game over called":False,"start of move called":False,"item stealing":(False, None),"forage":False,"monkey":0,"until end just changed":False,"concede":None,"await p2":False,"disconnecting":False,"just selected":False}
 selected=None #card displayed on the side
 selected_move=None #move that has been selected
 attack_progressing=False #is it the attack target choosing stage
@@ -1571,8 +1610,6 @@ move_hovering_over:tuple[Rect,Callable]|tuple[Rect,Surface,Rect,int,int]=None #t
 targets=[]
 until_end=0
 ability_selected=False
-infojson:dict[str,dict]=json.loads(b.unhexlify(infofile.read()))
-playerjson:dict[str,dict]=json.loads(b.unhexlify(player_infofile.read()))
 selected_deck:None|DeckPreset=None
 selected_large=None
 deleting_deck=False
@@ -1591,6 +1628,10 @@ subsetting=None
 chosen_card_bg=playerjson["chosen card bg"]
 cardback=transform.scale(image.load(f"Assets\\Backs\\{chosen_card_bg.lower()}.png"),card_dim).convert_alpha()
 ai_wait_until:float|int=0
+hide_large=False
+large_hideable=chosen_layout.large_hideable
+hand_fill_type=chosen_layout.hand_fill_type
+large_image=None
 #endregion
 
 #region card definitions
@@ -1599,37 +1640,37 @@ ai_wait_until:float|int=0
 deck_plc=Item("Deck Placeholder",0,None,transform.rotate(cardback,90),deck_plc_pos,transform.rotate(cardback,90),None,card_dim_rot,'',None,None)
 whole_field=Item("THE ENTIRE FIELD!!!",0,nofunction_item,r"Assets\Whole Field.png",(fields_anchor[0],fields_anchor[1]),r"Assets\Whole Field.png","pink",(3*cut_dim[0]+3*card_spacing_x,2*cut_dim[1]+card_dim_rot[1]+2*card_spacing_y),None,None,None)
 preset_dummy=Mob("Dummy",0,999,[],[bite],{},{},"misc","plains","pink",r"Sprites\Dummy.png",(0,0),r"Cut Sprites\Dummy.png",[(987,512,1323,579)])
-axolotl=r'Mob("Axolotl",3,3,[],[bite],{"on death":play_dead},{},"aquatic","ocean","blue",r"Sprites\Axolotl.png",(0,0),r"Cut SPrites\Axolotl.png",[(987,512,1323,579)])'
-bogged=r'Mob("Bogged",3,3,[],[snipe],{"on death":spore},{},"undead","swamp","blue",r"Sprites\Bogged.webp",(0,0),r"Cut Sprites\Bogged.jpg",[(987,522,1323,579)])'
+axolotl=r'Mob("Axolotl",3,3,[],[bite],{"on death":play_dead},{},"aquatic","ocean","blue",r"Sprites\Axolotl.png",(0,0),r"Cut SPrites\Axolotl.png",[(57,412,393,479)])'
+bogged=r'Mob("Bogged",3,3,[],[snipe],{"on death":spore},{},"undead","swamp","blue",r"Sprites\Bogged.webp",(0,0),r"Cut Sprites\Bogged.jpg",[(57,422,393,479)])'
 bread=r'Item("Bread",1,bread_heal,r"Sprites\Bread.png",(0,0),r"Cut Sprites\Bread.png","blue",card_dim,"when played",1,"all healable")'
 cake=r'Item("Cake",2,cake_heal,r"Sprites\Cake.png",(0,0),r"Cut Sprites\Cake.png","blue",card_dim,"when played",1,"your field")'
-cow=r'Mob("Cow",3,4,[Ability(1,milk_share,"can be healed","Milk Share")],[rush],{},{},"misc","plains","blue",r"Sprites\Cow.png",(0,0),r"Cut Sprites\Cow.png",[(987,445,1323,502),(987,502,1323,569)])'
-chicken=r'Mob("Chicken",1,2,[],[rush],{"on this turn":mystery_egg},{},"misc","plains","blue",r"Sprites\Chicken.png",(0,0),r"Cut Sprites\Chicken.png",[(987,512,1323,579)])'
-creeper=r'Mob("Creeper",2,2,[Ability(0,prime,"player2 field","Prime")],[],{},{},"misc","cavern","blue",r"Sprites\Creeper.png",(0,0),r"Cut Sprites\Creeper.png",[(987,445,1323,552)],prime_status=0)'
-drowned=r'Mob("Drowned",2,4,[],[drown],{},{},"aquatic","ocean","blue",r"Sprites\Drowned.png",(0,0),r"Cut Sprites\Drowned.png",[(987,497,1323,564)])'
-dummy=r'Mob("Dummy",0,999,[],[bite],{},{},"misc","plains","pink",r"Sprites\Dummy.png",(0,0),r"Cut Sprites\Dummy.png",[(987,512,1323,579)])'
-elder=r'Mob("Elder",6,6,[],[warding_laser],{"end of turn":elders_curse},{},"aquatic","ocean","pink",r"Sprites\Elder.png",(0,0),r"Cut Sprites\Elder.png",[(987,522,1323,589)])'
+cow=r'Mob("Cow",3,4,[Ability(1,milk_share,"can be healed","Milk Share")],[rush],{},{},"misc","plains","blue",r"Sprites\Cow.png",(0,0),r"Cut Sprites\Cow.png",[(57,345,393,402),(57,402,393,469)])'
+chicken=r'Mob("Chicken",1,2,[],[rush],{"on this turn":mystery_egg},{},"misc","plains","blue",r"Sprites\Chicken.png",(0,0),r"Cut Sprites\Chicken.png",[(57,412,393,479)])'
+creeper=r'Mob("Creeper",2,2,[Ability(0,prime,"player2 field","Prime")],[],{},{},"misc","cavern","blue",r"Sprites\Creeper.png",(0,0),r"Cut Sprites\Creeper.png",[(57,345,393,452)],prime_status=0)'
+drowned=r'Mob("Drowned",2,4,[],[drown],{},{},"aquatic","ocean","blue",r"Sprites\Drowned.png",(0,0),r"Cut Sprites\Drowned.png",[(57,397,393,464)])'
+dummy=r'Mob("Dummy",0,999,[],[bite],{},{},"misc","plains","pink",r"Sprites\Dummy.png",(0,0),r"Cut Sprites\Dummy.png",[(57,412,393,479)])'
+elder=r'Mob("Elder",6,6,[],[warding_laser],{"end of turn":elders_curse},{},"aquatic","ocean","pink",r"Sprites\Elder.png",(0,0),r"Cut Sprites\Elder.png",[(57,422,393,489)])'
 egg_rain=r'Item("Egg Rain",1,egg_rain_activate,r"Sprites\Egg Rain.png",(0,0),r"Cut Sprites\Egg Rain.png","blue",card_dim,"on attack",1,"opp field")'
-frog=r'Mob("Frog",2,3,[],[tongue_whip],{},{},"aquatic","swamp","blue",r"Sprites\Frog.png",(0,0),r"Cut Sprites\Frog.png",[(987,512,1323,579)])'
+frog=r'Mob("Frog",2,3,[],[tongue_whip],{},{},"aquatic","swamp","blue",r"Sprites\Frog.png",(0,0),r"Cut Sprites\Frog.png",[(57,412,393,479)])'
 goat_horn=r'Item("Goat Horn",3,goat_horn_bounce,r"Sprites\Goat Horn.png",(0,0),r"Cut Sprites\Goat Horn.png","pink",card_dim,"when played",1,"special: goat horn")'
-guardian=r'Mob("Guardian",4,3,[],[eye_laser],{"on hurt":thorn_body},{},"aquatic","ocean","blue",r"Sprites\Guardian.png",(0,0),r"Cut Sprites\Guardian.png",[(987,502,1323,569)])'
-horse=r'Mob("Horse",4,5,[],[bite],{"special: quick strike":quick_strike},{},"misc","plains","pink",r"Sprites\Horse.png",(0,0),r"Cut Sprites\Horse.png",[(987,512,1323,579)])'
+guardian=r'Mob("Guardian",4,3,[],[eye_laser],{"on hurt":thorn_body},{},"aquatic","ocean","blue",r"Sprites\Guardian.png",(0,0),r"Cut Sprites\Guardian.png",[(57,402,393,469)])'
+horse=r'Mob("Horse",4,5,[],[bite],{"special: quick strike":quick_strike},{},"misc","plains","pink",r"Sprites\Horse.png",(0,0),r"Cut Sprites\Horse.png",[(57,412,393,479)])'
 loot_chest=r'Item("Loot Chest",0,loot_chest_draw,r"Sprites\Loot Chest.png",(0,0),r"Cut Sprites\Loot Chest.png","blue",card_dim,"when played",1,"whole field")'
 milk=r'Item("Milk",2,milk_cleanse,r"Sprites\Milk.png",(0,0),r"Cut Sprites\Milk.png","blue",card_dim,"when played",1,"your field")'
-muddy_pig=r'Mob("Muddy Pig",2,3,[],[rush],{"on this turn":forage},{},"misc","plains","blue",r"Sprites\Muddy Pig.png",(0,0),r"Cut Sprites\Muddy Pig.png",[(987,512,1323,579)])'
+muddy_pig=r'Mob("Muddy Pig",2,3,[],[rush],{"on this turn":forage},{},"misc","plains","blue",r"Sprites\Muddy Pig.png",(0,0),r"Cut Sprites\Muddy Pig.png",[(57,412,393,479)])'
 pufferfish=r'Item("Pufferfish",2,puffer_poison,r"Sprites\Pufferfish.png",(0,0),r"Cut Sprites\Pufferfish.png","blue",card_dim,"when played",1,"whole field")'
-satoru_gojo='Mob("Satoru Gojo",9,20,[Ability(0,nah_id_win,"whole field","Nah, I\'d Win")],[purple],{"on hurt":infinity},{},"misc","plains","pink",r"Sprites\\Satoru Gojo.png",(0,0),r"Cut Sprites\\Satoru Gojo.png",[(987,502,1323,554),(987,554,1323,614)])'
-sheep=r'Mob("Sheep",3,4,[Ability(0,wool_guard,"can proxy","Wool Guard")],[rush],{},{},"misc","plains","blue",r"Sprites\Sheep.png",(0,0),r"Cut Sprites\Sheep.png",[(987,447,1323,499),(987,499,1323,554)])'
+satoru_gojo='Mob("Satoru Gojo",9,20,[Ability(0,nah_id_win,"whole field","Nah, I\'d Win")],[purple],{"on hurt":infinity},{},"misc","plains","pink",r"Sprites\\Satoru Gojo.png",(0,0),r"Cut Sprites\\Satoru Gojo.png",[(57,402,393,454),(57,454,393,514)])'
+sheep=r'Mob("Sheep",3,4,[Ability(0,wool_guard,"can proxy","Wool Guard")],[rush],{},{},"misc","plains","blue",r"Sprites\Sheep.png",(0,0),r"Cut Sprites\Sheep.png",[(57,347,393,399),(57,399,393,454)])'
 shield=r'Item("shield",2,shield_protect,r"Sprites\Shield.png",(0,0),r"Cut Sprites\Shield.png","blue",card_dim,"on hurt",1,"your field")'
-skeleton=r'Mob("Skeleton",2,3,[],[snipe],{"on hurt":undead},{},"undead","cavern","blue",r"Sprites\Skeleton.png",(0,0),r"Cut Sprites\Skeleton.png",[(987,512,1323,569)])'
-slime=r'Mob("Slime",3,4,[],[squish],{"on death":split},{},"misc","swamp","blue",r"Sprites\Slime.png",(0,0),r"Cut Sprites\Slime.png",[(987,537,1323,609)],rotation=0)'
-spider=r'Mob("Spider",1,2,[],[spider_bite],{},{},"arthropod","cavern","blue",r"Sprites\Spider.png",(0,0),r"Cut Sprites\Spider.png",[(987,512,1323,569)])'
-sunken=r'Mob("Sunken",2,3,[],[snipe],{},{},"aquatic","ocean","blue",r"Sprites\Sunken.png",(0,0),r"Cut Sprites\Sunken.png",[(987,497,1323,554)])'
+skeleton=r'Mob("Skeleton",2,3,[],[snipe],{"on hurt":undead},{},"undead","cavern","blue",r"Sprites\Skeleton.png",(0,0),r"Cut Sprites\Skeleton.png",[(57,412,393,469)])'
+slime=r'Mob("Slime",3,4,[],[squish],{"on death":split},{},"misc","swamp","blue",r"Sprites\Slime.png",(0,0),r"Cut Sprites\Slime.png",[(57,437,393,509)],rotation=0)'
+spider=r'Mob("Spider",1,2,[],[spider_bite],{},{},"arthropod","cavern","blue",r"Sprites\Spider.png",(0,0),r"Cut Sprites\Spider.png",[(57,412,393,469)])'
+sunken=r'Mob("Sunken",2,3,[],[snipe],{},{},"aquatic","ocean","blue",r"Sprites\Sunken.png",(0,0),r"Cut Sprites\Sunken.png",[(57,397,393,454)])'
 sword=r'Item("Sword",1,sword_slash,r"Sprites\Sword.png",(0,0),r"Cut Sprites\Sword.png","blue",card_dim,"on attack",1,"your field")'
-toji=r'Mob("Toji",9,20,[Ability(0,monkey,"whole field","Monkey!")],[knife_thing],{"always":child_support_avoider},{},"undead","plains","pink",r"Sprites\Toji.png",(0,0),r"Cut Sprites\Toji.png",[(987,497,1323,554),(987,554,1323,614)])'
+toji=r'Mob("Toji",9,20,[Ability(0,monkey,"whole field","Monkey!")],[knife_thing],{"always":child_support_avoider},{},"undead","plains","pink",r"Sprites\Toji.png",(0,0),r"Cut Sprites\Toji.png",[(57,397,393,454),(57,454,393,514)])'
 trident=r'Item("Trident",2,trident_stab,r"Sprites\Trident.png",(0,0),r"Cut SPrites\Trident.png","pink",card_dim,"on attack",1,"your field")'
-witch=r'Mob("Witch",3,4,[Ability(1,witch_poison,"player2 field","Poison"),Ability(1,witch_healing,"player1 field","Heal")],[],{"end this turn":self_aid},{},["human"],"swamp","blue",r"Sprites\Witch.png",(0,0),r"Cut Sprites\Witch.png",[(987,497,1323,569),(987,569,1323,639)],poison_count=0,heal_count=0)'
-zombie=r'Mob("Zombie",2,4,[],[bite],{"on hurt":undead},{},"undead","cavern","blue",r"Sprites\Zombie.png",(0,0),r"Cut Sprites\Zombie.png",[(987,512,1323,579)])'
+witch=r'Mob("Witch",3,4,[Ability(1,witch_poison,"player2 field","Poison"),Ability(1,witch_healing,"player1 field","Heal")],[],{"end this turn":self_aid},{},["human"],"swamp","blue",r"Sprites\Witch.png",(0,0),r"Cut Sprites\Witch.png",[(57,397,393,469),(57,469,393,539)],poison_count=0,heal_count=0)'
+zombie=r'Mob("Zombie",2,4,[],[bite],{"on hurt":undead},{},"undead","cavern","blue",r"Sprites\Zombie.png",(0,0),r"Cut Sprites\Zombie.png",[(57,412,393,479)])'
 #Mob()
 #endregion
 
@@ -1649,7 +1690,7 @@ decklist_p2={"mobs":{zombie:8},"items":{sword:10}}
 deck_p1 = {"mobs":deckbuilder(decklist_p1["mobs"]),"items":deckbuilder(decklist_p1["items"])}
 deck_p2 = {"mobs":deckbuilder(decklist_p2["mobs"]),"items":deckbuilder(decklist_p2["items"])}
 playername=playerjson["name"]
-player1=Player(playername,1,(fields_anchor[0],y_rails[1]+cut_dim[1]+card_spacing_y),[(x_rails[0],y_rails[1]),(x_rails[1],y_rails[1]),(x_rails[2],y_rails[1])])
+player1=Player(playername,1,hand_anchors[0],[(x_rails[0],y_rails[1]),(x_rails[1],y_rails[1]),(x_rails[2],y_rails[1])])
 player2:Player=''
 #endregion
 
@@ -1695,6 +1736,7 @@ to_bg_cstm_text=ClickableText(mjgs,"Change background",(0,0,0),(window_dim[0]/2-
 settings_back_text=ClickableText(mjgs,"Back",(0,0,0),(window_dim[0]/2-mjgs.size("Back")[0]/2,750))
 playername_text=mjgs.render(f"Name: {playername}",True,(0,0,0))
 cardbg_change_text=ClickableText(mjgs,"Change card back",(0,0,0),(window_dim[0]/2-mjgs.size("Change card back")[0]/2,300))
+change_game_layout_text=ClickableText(mjgs,"Change game layout",(0,0,0),(window_dim[0]/2-mjgs.size("Change game layout")[0]/2,500))
 #endregion
 
 while running:
@@ -1728,6 +1770,7 @@ while running:
             player_infofile=open(r"Assets\p_info.hex","wb")
             playerjson["name"]=playername
             playerjson["chosen card bg"]=chosen_card_bg
+            playerjson["layout"]=chosen_layout_name
             player_infofile.write(b.hexlify(json.dumps(playerjson).encode()))
             player_infofile.close()
             running=False
@@ -1745,9 +1788,10 @@ while running:
                     if markers["do not connect"]:
                         if chosen_deck.usable:
                             state="game"
-                            player2=Player("Player 2",2,(fields_anchor[0],fields_anchor[1]/2-card_dim[1]+10),[(x_rails[0],y_rails[0]),(x_rails[1],y_rails[0]),(x_rails[2],y_rails[0])])
+                            player2=Player("Player 2",2,hand_anchors[1],[(x_rails[0],y_rails[0]),(x_rails[1],y_rails[0]),(x_rails[2],y_rails[0])])
                         else:
                             linger_anims.append([deck_unusable_warning,(window_dim[0]/2-deck_unusable_warning.get_width()/2,400),0,120,"inverse down",0])
+                        player1=Player(playername,1,hand_anchors[0],[(x_rails[0],y_rails[1]),(x_rails[1],y_rails[1]),(x_rails[2],y_rails[1])])
                     else:
                         connect_state="hosting"
                 elif connect_text.textrect.collidepoint(pos):
@@ -1780,15 +1824,38 @@ while running:
                         subsetting="bg"
                     elif cardbg_change_text.textrect.collidepoint(pos):
                         subsetting="cardbg"
-                    elif subsetting == "profile":
-                        if name_change_text.textrect.collidepoint(pos):
-                            name_changing=True
+                    elif change_game_layout_text.textrect.collidepoint(pos):
+                        subsetting="layout"
+                elif subsetting == "profile":
+                    if name_change_text.textrect.collidepoint(pos):
+                        name_changing=True
                 elif subsetting == "cardbg":
                     for bg in card_bgs:
                         if bg.rect.collidepoint(pos):
                             chosen_card_bg=bg.name
                             cardback=transform.scale(image.load(bg.path),card_dim).convert_alpha()
                             deck_plc.current_sprite=transform.rotate(cardback,90)
+                elif subsetting == "layout":
+                    for layout in layouts:
+                        if layout.rect.collidepoint(pos):
+                            chosen_layout_name=layout.name
+                            fields_anchor=layout.field_anchor
+                            card_spacing_x=layout.x_spacing
+                            card_spacing_y=layout.y_spacing
+                            large_image_pos=layout.large_image_pos
+                            deck_plc_pos=layout.deck_plc_pos
+                            large_hideable=layout.large_hideable
+                            hand_fill_type=layout.hand_fill_type
+                            y_rails=[fields_anchor[1],fields_anchor[1]+card_spacing_y*2+card_dim_rot[1]+cut_dim[1]]
+                            x_rails=[fields_anchor[0],fields_anchor[0]+cut_dim[0]+card_spacing_x,fields_anchor[0]+cut_dim[0]*2+card_spacing_x*2]
+                            if layout.hand_anchor == layout.field_anchor:
+                                hand_anchors=[(fields_anchor[0],y_rails[1]+cut_dim[1]+card_spacing_y),(fields_anchor[0],fields_anchor[1]/2-card_dim[1]+10)]
+                            else:
+                                hand_anchors=layout.hand_anchor
+                            hearts_rails=[y_rails[0]+cut_dim[0]+10,y_rails[1]-10-20]
+                            subturn_indic_pos=layout.subturn_indic_pos
+                            deck_plc=Item("Deck Placeholder",0,None,transform.rotate(cardback,90),deck_plc_pos,transform.rotate(cardback,90),None,card_dim_rot,'',None,None)
+                            whole_field=Item("THE ENTIRE FIELD!!!",0,nofunction_item,r"Assets\Whole Field.png",(fields_anchor[0],fields_anchor[1]),r"Assets\Whole Field.png","pink",(3*cut_dim[0]+3*card_spacing_x,2*cut_dim[1]+card_dim_rot[1]+2*card_spacing_y),None,None,None)
 
             elif state == "deck screen":
                 if decks_to_menu_text.textrect.collidepoint(pos):
@@ -1848,6 +1915,7 @@ while running:
                     for mob in selected_deck.mobs:
                         if mob.rect.collidepoint(pos):
                             selected=mob
+                            hide_large=False
                             selected_deck.set_renders(mob.rect)
                             temp=True
                         if not temp:
@@ -1857,6 +1925,7 @@ while running:
                     for item in selected_deck.items:
                         if item.rect.collidepoint(pos):
                             selected=item
+                            hide_large=False
                             selected_deck.set_renders(item.rect)
                             temp=True
                         if not temp:
@@ -1888,28 +1957,39 @@ while running:
 
             elif state == "game" and not attack_progressing:
                 for card in player1.field:
-                    if card != None :
+                    if card != None and not (large_hideable and not hide_large and large_image.get_rect(x=large_image_pos[0],y=large_image_pos[1]).collidepoint(pos)):
                         if card.rect.collidepoint(pos):
                             selected=card
+                            hide_large=False
+                            markers["just selected"]=True
                         for item in card.items:
                             for subitem in card.items[item]:
                                 if subitem.rect.collidepoint(pos):
                                     selected=subitem
+                                    hide_large=False
+                                    markers["just selected"]=True
                 for card in player1.hand:
                     if card.rect.collidepoint(pos):
                         selected=card
+                        hide_large=False
+                        markers["just selected"]=True
                 for card in player2.field:
                     if card != None:
                         if card.rect.collidepoint(pos):
                             selected=card
+                            hide_large=False
+                            markers["just selected"]=True
                         for item in card.items:
                             for subitem in card.items[item]:
                                 if subitem.rect.collidepoint(pos):
                                     selected=subitem
+                                    hide_large=False
+                                    markers["just selected"]=True
                 for card in player2.hand:
                     if card.rect.collidepoint(pos) and card.current_sprite != card.back_sprite:
                         selected=card
-                if move_hovering_over != None and not True in [card.rect.collidepoint(mouse.get_pos()) for card in player1.hand]:
+                        hide_large=False
+                if move_hovering_over != None and ((not True in [card.rect.collidepoint(mouse.get_pos()) for card in player1.hand+[mob for mob in player1.field if mob != None]+[mob for mob in player2.field if mob != None]] and not large_hideable) or (large_hideable and not hide_large)):
                     if type(selected) == Mob and move_hovering_over[0].collidepoint(pos) and player1.field.index(selected) == subturn-1:
                         selected_move=move_hovering_over[1]
                         if type(selected_move) != Ability:
@@ -1941,6 +2021,9 @@ while running:
                         else:
                             if markers["not enough souls"][0] == 0 and min(hand_cost) >= player1.souls:
                                 markers["not enough souls"]=[6,5,0,0] #[amount of cycles,frames per cycle,current colour,frame number]
+                if large_image != None and large_hideable and not large_image.get_rect(left=large_image_pos[0],top=large_image_pos[1]).collidepoint(pos) and not markers["just selected"]:
+                    hide_large=True
+                markers["just selected"]=False
 
             elif attack_progressing:
                 if type(selected) == Mob and markers["item stealing"][0] == False:
@@ -1960,6 +2043,8 @@ while running:
                                     card.moveset[0](origin=target,target=selected,player=player2,noattack=False)
                             else:
                                 result=selected_move.effect(origin=selected,target=target,player=player1,loc=(selected.rect.x,selected.rect.y+cut_dim[1]/2))
+                            if large_hideable:
+                                hide_large=True
                             if until_end == 0:
                                 if selected != None:
                                     if "end this turn" in selected.passives:
@@ -1983,6 +2068,7 @@ while running:
                                     selected = player1.field[abs_subturn%len(filled_positions)]
                                 else:
                                     selected=player1.field[0]
+                                    hide_large=False
                                     postsubturn += 1
                                 attack_progressing=False
                                 selected_move=None
@@ -2005,6 +2091,8 @@ while running:
                                     player1.souls -= selected.cost
                                 if targets == [whole_field]:
                                     player1.add_to_field(0,0,False,card_override=selected,pos_override=card)
+                                if large_hideable:
+                                    hide_large=True
                                 if until_end == 0:
                                     if player1.field[subturn-1] != None:
                                         if "end this turn" in player1.field[subturn-1].passives:
@@ -2028,6 +2116,7 @@ while running:
                                         selected = player1.field[abs_subturn%len(filled_positions)]
                                     else:
                                         selected=player1.field[0]
+                                        hide_large=False
                                         postsubturn += 1
                                     attack_progressing=False
                                     selected_move=None
@@ -2084,8 +2173,9 @@ while running:
                 attack_choosing_state=False
                 HOST=''
                 sock=''
-                markers={"retry":False, "deck built":False, "do not connect":True, "start of turn called":False, "not enough souls":[0,0,0,0], "data received, proceed":False, "just chose":False, "finishable":True, "freeze":False, "game over called":False, "fade":[0,[0,0,0],0,0,0], "start of move called":False,"item stealing":(False, None),"forage":False,"monkey":0,"until end just changed":False,"concede":None,"await p2":False,"disconnecting":False}
+                markers={"retry":False, "deck built":False, "do not connect":True, "start of turn called":False, "not enough souls":[0,0,0,0], "data received, proceed":False, "just chose":False, "finishable":True, "freeze":False, "game over called":False, "fade":[0,[0,0,0],0,0,0], "start of move called":False,"item stealing":(False, None),"forage":False,"monkey":0,"until end just changed":False,"concede":None,"await p2":False,"disconnecting":False,"hide large":False,"just selected":False}
                 selected=None
+                hide_large=False
                 selected_move=None
                 attack_progressing=False
                 move_hovering_over=None
@@ -2261,13 +2351,9 @@ while running:
         screen.blit(deck_plc.current_sprite,(deck_plc.rect.x,deck_plc.rect.y))
         screen.blit(whole_field.current_sprite,(fields_anchor[0],fields_anchor[1]))
         if setup == True or abs_subturn > 2:
-            screen.blit(subturn_sprites[0],(760,210))
+            screen.blit(subturn_sprites[0],subturn_indic_pos)
         else:
-            screen.blit(subturn_sprites[abs_subturn+1],(760,210))
-        if selected != None:
-            large_image=transform.scale(image.load(selected.original_sprite),(card_dim[0]*3,card_dim[1]*3)).convert()
-            draw.rect(screen,ORANGE,Rect(selected.rect.x-5,selected.rect.y-5,selected.rect.width+10,selected.rect.height+10),5)
-            screen.blit(large_image,large_image_pos)
+            screen.blit(subturn_sprites[abs_subturn+1],subturn_indic_pos)
         for i in range(3):
             if player1.field[i] == None and type(selected) != Item and selected in player1.hand:
                 temp=Rect(player1.field_pos[i],cut_dim)
@@ -2332,6 +2418,32 @@ while running:
             draw.rect(screen,(255,255,255),Rect(player1.field_pos[postsubturn-2][0],player1.field_pos[postsubturn-2][1]+cut_dim[1]+10,cut_dim[0],10))
         player1.update()
         player2.update()
+        if selected != None and not hide_large:
+            if large_hideable:
+                temp=Surface((window_dim[0],window_dim[1]),SRCALPHA,32)
+                temp.fill((0,0,0,128))
+                screen.blit(temp,(0,0))
+            large_image=transform.scale(image.load(selected.original_sprite),(card_dim[0]*3,card_dim[1]*3)).convert()
+            draw.rect(screen,ORANGE,Rect(selected.rect.x-5,selected.rect.y-5,selected.rect.width+10,selected.rect.height+10),5)
+            screen.blit(large_image,large_image_pos)
+        if type(selected) == Mob and selected == player1.field[subturn-1] and setup == False and not hide_large:
+            if not attack_progressing:
+                for position in selected.move_positions:
+                    if position.collidepoint(mouse.get_pos()):
+                        draw.rect(screen,ORANGE,position,5)
+                        if selected.move_positions.index(position) < len(selected.moveset):
+                            move_hovering_over=(position,selected.moveset[selected.move_positions.index(position)])
+                        else:
+                            move_hovering_over=(position,selected.abilities[selected.move_positions.index(position)-len(selected.moveset)])
+            else:
+                draw.rect(screen,ORANGE,move_hovering_over[0],5)
+        elif type(selected) == Item and not setup and not hide_large:
+            if selected.display_rect.collidepoint(mouse.get_pos()) and not attack_progressing:
+                if not True in [card.rect.collidepoint(mouse.get_pos()) for card in player1.hand]:
+                    draw.rect(screen,ORANGE,Rect(selected.display_rect.left-5,selected.display_rect.top-5,selected.display_rect.width,selected.display_rect.height),5)
+                    move_hovering_over=(selected.display_rect,selected.effect)
+            elif attack_progressing:
+                draw.rect(screen,ORANGE,Rect(selected.display_rect.left-5,selected.display_rect.top-5,selected.display_rect.width,selected.display_rect.height),5)
         for card in targets:
             if card != None:
                 temp=Rect(card.rect.x,card.rect.y,card.rect.width,card.rect.height)
@@ -2426,15 +2538,19 @@ while running:
                 screen.blit(to_profile_text.text,to_profile_text.position)
                 screen.blit(to_bg_cstm_text.text,to_bg_cstm_text.position)
                 screen.blit(cardbg_change_text.text,cardbg_change_text.position)
-            if subsetting == "profile":
+                screen.blit(change_game_layout_text.text,change_game_layout_text.position)
+            elif subsetting == "profile":
                 screen.blit(name_change_text.text,name_change_text.position)
                 screen.blit(playername_text,(250,150))
                 if name_changing:
                     draw.rect(screen,(255,255,255),Rect(window_dim[0]/2,200,window_dim[0]/2-50,60))
                     screen.blit(mjgs.render(playername,True,(0,0,0)),(window_dim[0]/2+10,210))
-            if subsetting == "cardbg":
+            elif subsetting == "cardbg":
                 for bg in card_bgs:
                     bg.display()
+            elif subsetting == "layout":
+                for layout in layouts:
+                    layout.display()
     screen.blit(settings_button[0],settings_button[1])
     if markers["disconnecting"]:
         disconnect_cd -= 1
@@ -2470,6 +2586,7 @@ while running:
     9. Change ability activating system to call Ability instead, so a proper name instead of a cheesed one can be displayed
     10. Lose on deck out, or maybe after a turn timer ends (timer starts on deck out)
     11. Add card draw info to communication format (since both players have different decks)
+    12. Add uninstall feature
 
     Bugs:
     1. Colour wheel png is not actually transparent
