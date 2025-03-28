@@ -1033,10 +1033,6 @@ def p2_move(hand:list[Card],field:list[Mob|None],souls:int) -> bytes: #returns a
             break
     return result.encode()
 
-def retry_del(func, path, exc_info):
-    os.chmod(path, stat.S_IWRITE)
-    os.remove(path)
-
 def atk_check(func) -> bool: #decorator that applies to all attacks
     def atk_wrapper(**kwargs):
         global markers
@@ -1558,7 +1554,7 @@ PORT=6543
 effect_sprites={"psn":image.load(r"Assets\psn.png").convert_alpha(),"aquatised":transform.scale(image.load(r"Assets\aquatised.png"),(23,23)).convert()}
 monkey_sprite=transform.scale(image.load(r"Assets\monkey.png"),(840*(window_dim[1]/859),window_dim[1])).convert_alpha()
 subturn_sprites=[transform.scale(image.load(r"Assets\abs_subturn_none.png"),(150,360)).convert_alpha(),transform.scale(image.load(r"Assets\abs_subturn_1.webp"),(150,360)).convert_alpha(),transform.scale(image.load(r"Assets\abs_subturn_2.webp"),(150,360)).convert_alpha(),transform.scale(image.load(r"Assets\abs_subturn_3.png"),(150,360)).convert_alpha()]
-#sys.excepthook=excepthook
+sys.excepthook=excepthook
 game_id=str(int(tm.time()))
 colour_wheel=transform.scale(image.load(r"Assets\colour_wheel.png").convert_alpha(),(70,70))
 colour_wheel_rect=Rect(window_dim[0]-90,20,70,70)
@@ -1610,8 +1606,8 @@ for i in range(len(card_bgs_raw)):
     card_bgs.append(BGTile(transform.scale(image.load(f"Assets\\Backs\\{card_bgs_raw[i].name}"),card_dim),f"Assets\\Backs\\{card_bgs_raw[i].name}",card_bgs_raw[i].name.split(".")[0].capitalize(),(50+(card_dim[0]+50)*(i%8),100+(card_dim[1]+75)*(i//8))))
 thinking=transform.scale(image.load(r"Assets\thinking.png"),(50,50)).convert_alpha()
 thinking_progress:int=0
-#ai_delay=lambda: randint(1,5)
-ai_delay=lambda: 0.5
+ai_delay=lambda: randint(1,5)
+#ai_delay=lambda: 0.5
 hand_size_limit=9
 #endregion
 
@@ -1794,17 +1790,6 @@ while running:
         markers["await p2"]=temp
     sockinfo="g".encode()
     sock_write="g"
-    if markers["uninstalling"]:
-        all_entries=list(os.scandir(os.getcwd()))
-        folders=[entry.path for entry in all_entries if entry.is_dir()]
-        files=[entry.path for entry in all_entries if not entry.is_dir()]
-        files.pop(files.index(__file__))
-        for folder in folders:
-            rmtree(folder,onexc=retry_del)
-        for file in files:
-            os.remove(file)
-        if os.getcwd()[-9:-1] == "Minecard":
-            rmtree(os.getcwd(),onexc=retry_del)
 
     for e in event.get():
         if e.type == QUIT and not markers["uninstalling"]:
@@ -2099,7 +2084,6 @@ while running:
                                 if (counter == True or counter == other_counter) and len(target.moveset) > 0:
                                     card.moveset[0](origin=target,target=selected,player=player2,noattack=False)
                             else:
-                                #result=selected_move.effect(origin=selected,target=target,player=player1,loc=(selected.rect.x,selected.rect.y+cut_dim[1]/2))
                                 result=selected_move.use(origin=selected,target=target,player=player1,loc=(selected.rect.x,selected.rect.y+cut_dim[1]/2))
                             if large_hideable:
                                 hide_large=True
@@ -2214,6 +2198,8 @@ while running:
                             move_hovering_over=None
                             attack_progressing=False
                             targets=[]
+                if large_hideable and not large_image.get_rect(x=large_image_pos[0],y=large_image_pos[1]).collidepoint(pos):
+                    hide_large=True
                 markers["just chose"]=False
 
         elif e.type == MOUSEBUTTONUP and state in game_overs:
@@ -2651,7 +2637,7 @@ while running:
     4. HOLD: Implement setting colour for decks
     5. Might need to flip player 1 and 2 in execute() (since from the opponent's perspective, they are player 1 and you are player 2, but from your perspective its flipped)
     6. Lose on deck out, or maybe after a turn timer ends (timer starts on deck out)
-    7. Add uninstall feature
+    7. Add uninstall feature or auto-updater feature
 
     Bugs:
     1. Player 2 can sometimes choose None mobs to add items to, which causes a crash
