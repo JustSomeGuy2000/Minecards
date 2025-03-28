@@ -10,6 +10,7 @@ import binascii as b
 import time as tm
 import socket
 import select
+import stat
 import copy
 import json
 import sys
@@ -1032,6 +1033,10 @@ def p2_move(hand:list[Card],field:list[Mob|None],souls:int) -> bytes: #returns a
             break
     return result.encode()
 
+def retry_del(func, path, exc_info):
+    os.chmod(path, stat.S_IWRITE)
+    os.remove(path)
+
 def atk_check(func) -> bool: #decorator that applies to all attacks
     def atk_wrapper(**kwargs):
         global markers
@@ -1790,15 +1795,16 @@ while running:
     sockinfo="g".encode()
     sock_write="g"
     if markers["uninstalling"]:
-        all_entries=os.scandir(os.getcwd())
+        all_entries=list(os.scandir(os.getcwd()))
         folders=[entry.path for entry in all_entries if entry.is_dir()]
         files=[entry.path for entry in all_entries if not entry.is_dir()]
         files.pop(files.index(__file__))
         for folder in folders:
-            rmtree(folder)
+            rmtree(folder,onexc=retry_del)
         for file in files:
             os.remove(file)
-        rmtree(os.getcwd())
+        if os.getcwd()[-9:-1] == "Minecard":
+            rmtree(os.getcwd(),onexc=retry_del)
 
     for e in event.get():
         if e.type == QUIT and not markers["uninstalling"]:
