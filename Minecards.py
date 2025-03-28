@@ -1,6 +1,7 @@
 from __future__ import annotations
 from collections.abc import Callable
 from typing import Literal
+from shutil import rmtree
 from math import copysign
 from random import *
 from pygame import *
@@ -31,7 +32,7 @@ small_font=font.Font(r"Assets\mojangles.ttf",20)
 large_font=font.Font(r"Assets\mojangles.ttf",80)
 
 class Mob(sprite.Sprite):
-    def __init__(self,name:str,cost:int,health:int,abilities:list[Ability],attacks:list[Callable],passives:dict[Literal["end of turn","start of turn","on death","on hurt","on attack","when played","on this turn","always","end this turn"],Callable],items:dict[Literal["end of turn","start of turn","on death","on hurt","on attack","when played","on this turn"],list[Item]],mob_class:Literal["undead","arthropod","aquatic","human","misc"],biome:Literal["plains","cavern","ocean","swamp"],border:Literal["blue","pink"],sprite:Path,init_pos:Coord,cut_sprite:Path,move_positions:list[tuple[int,int,int,int]],**kwargs):
+    def __init__(self,name:str,cost:int,health:int,abilities:list[Ability],attacks:list[Callable],passives:dict[Literal["end of turn","start of turn","on death","on hurt","on attack","when played","on this turn","always","end this turn"],Callable],items:dict[Literal["end of turn","start of turn","on death","on hurt","on attack","when played","on this turn"],list[Item]],mob_class:Literal["undead","arthropod","aquatic","human","misc"],biome:Literal["plains","cavern","ocean","swamp"],border:Literal["blue","pink"],sprite:Path,init_pos:Coord,cut_sprite:Path,move_positions:list[tuple[int,int,int,int]],id_num:int=0,**kwargs):
         super().__init__()
         #MOB INFO
         self.name=name
@@ -53,6 +54,7 @@ class Mob(sprite.Sprite):
         self.border=border #blue or pink
         self.miscs=kwargs
         self.original_miscs=kwargs
+        self.id_num=id_num
         self.proxy_for=None
         self.proxy=None
         self.owned_by=None
@@ -138,7 +140,10 @@ class Mob(sprite.Sprite):
         for item in self.items:
             for subitem in self.items[item]:
                 if subitem.times == []:
-                    subitem.internal_coords[0], subitem.internal_coords[1]= (self.rect.x+cut_dim[0]*2/3, self.rect.y+item_dim[1]*denest(self.items).index(subitem))
+                    if len(denest(self.items)) <= 2:
+                        subitem.internal_coords[0], subitem.internal_coords[1]= (self.rect.x+cut_dim[0]*2/3, self.rect.y+item_dim[1]*denest(self.items).index(subitem))
+                    else:
+                        subitem.internal_coords[0], subitem.internal_coords[1]= (self.rect.x+cut_dim[0]*2/3, self.rect.y+cut_dim[1]*(denest(self.items).index(subitem)/len(denest(self.items))))
                 subitem.update()
 
     def switch_sprite(self,final:Literal["front","back","cut"]):
@@ -218,7 +223,7 @@ def get_temp_text(textfont:font.Font,text:str,colour:tuple[int,int,int],loc:Coor
         return temp,(loc[0]+cut_dim[0]/2-temp.get_width()/2,loc[1])
 
 class Item(sprite.Sprite):
-    def __init__(self,name:str,cost:int,effect:Callable,sprite:Path,init_pos:Coord,cut_sprite:Path,border:Literal["blue","pink"],dimensions:Size,condition:Literal["end of turn","start of turn","on death","on hurt","on attack","when played"],uses:int,targets:Literal["can be healed","your field","opp field","whole field","all on field","all healable"]):
+    def __init__(self,name:str,cost:int,effect:Callable,sprite:Path,init_pos:Coord,cut_sprite:Path,border:Literal["blue","pink"],dimensions:Size,condition:Literal["end of turn","start of turn","on death","on hurt","on attack","when played"],uses:int,targets:Literal["can be healed","your field","opp field","whole field","all on field","all healable"],id_num:int=0):
         super().__init__()
         #ITEM INFO
         self.name=name
@@ -229,6 +234,7 @@ class Item(sprite.Sprite):
         self.condition=condition #when the item activates
         self.uses=uses
         self.targets=targets
+        self.id_num=id_num
         self.owned_by=None
         self.placed_on=None
         #SPRITE AND COORDS
@@ -369,7 +375,7 @@ class Player():
                 elif hand_fill_type == "right":
                     self.hand[i].internal_coords[1], self.hand[i].internal_coords[0]= (self.hand_pos[1],self.hand_pos[0]-card_dim[0]*i)
                 elif hand_fill_type == "centre":
-                    self.hand[i].internal_coords[1], self.hand[i].internal_coords[0]= (self.hand_pos[1],self.hand_pos[0]+(card_dim[0]*i)-(len(self.hand)*cut_dim[0])/2)
+                    self.hand[i].internal_coords[1], self.hand[i].internal_coords[0]= (self.hand_pos[1],self.hand_pos[0]+(card_dim[0]*(i))-(len(self.hand)*cut_dim[0])/2+card_dim[0]/2)
             self.hand[i].update()
             #display cards
         for card in self.field:
@@ -498,6 +504,28 @@ class Ability():
         elif self.targets == "can proxy":
             tempt=[mob for mob in player1.field if (mob != None and mob.proxy == None and mob.proxy_for == None and mob != selected)]
         return tempt
+    
+    def use(self,**kwargs):
+        stop=False
+        if kwargs["player"].player_number == 1:
+            opp=player2
+        else:
+            opp=player1
+        match=opp.field[kwargs["player"].field.index(kwargs["origin"])]
+        if "on action" in kwargs["origin"].items:
+            maybe=tuple(kwargs["origin"].items["on action"])
+            for subitem in maybe:
+                stop=subitem.effect(origin=kwargs["origin"],target=kwargs["target"],player=kwargs["player"],item=subitem)
+        if stop == True or (match != None and match.name == "Frog"): #egg rain and tongue snare
+            result=None
+        else:
+            result=self.effect(**kwargs)
+            if (type(result) == bool and result == True) or (type(result) == tuple and result[0] == True):
+                temp=get_temp_text(large_font,self.name,(250,100,250),kwargs["loc"])
+                linger_anims.append((temp[0],temp[1],0,60,"inverse down",200))
+            if type(result) == tuple:
+                result=result[1]
+        return result
 
 class Tile(): #a simplified container for card data
     def __init__(self,name:str,full_sprite:Surface,cut_sprite:Surface,kind:Literal["Mob"]|Literal["Item"],border:Literal["blue"]|Literal["pink"],position:Coord):
@@ -705,6 +733,7 @@ class DeckPreset(): #this gets confusing fast so I'll be leaving some comments
         
     def edit_title(self,e):
         global editing_deck_title
+        global menu_deck_selected_text
         if e.key == K_BACKSPACE:
             self.name = self.name[:-1]
         elif e.key == K_RETURN or e.key == K_ESCAPE:
@@ -712,6 +741,7 @@ class DeckPreset(): #this gets confusing fast so I'll be leaving some comments
         elif e.key != K_LESS and e.key != K_GREATER:
             self.name += e.unicode
         self.text=large_font.render(self.name,True,contrast(self.colour))
+        menu_deck_selected_text=mjgs.render(self.name,True,contrast(self.colour))
     
     def unpack(self,mobs:dict[str,int],items:dict[str,int],targettype:Literal["blacklist"]|Literal["whitelist"]="all",targets:list=[]):
         target_list=["mobs","items","pinks"]
@@ -816,26 +846,27 @@ def deckbuilder(list_to_use:dict[Card,int]) -> list[Card]:
     shuffle(here_deck)
     return here_deck
 
-def draw_card(player:Player,draw_from:dict[Card,int],amount:int=1,override=None) -> list[Card]|Card: # type: ignore
+def draw_card(player:Player,draw_from:list[Card],amount:int=1,override=None) -> list[Card]|Card: # type: ignore
+    global hand_size_limit
     if draw_from == []:
         return
     card_list=[]
     for i in range(amount):
-        if override == None:
-            card=draw_from.pop()
-        else:
-            card=override
-        player.hand.append(card)
-        card_list.append(card)
-        card.internal_coords=list(deck_plc_pos)
-        card.startmove([(player.hand_pos[0]+card_dim[0]*(len(player.hand)-1),player.hand_pos[1])],[30])
-        if hand_fill_type == "left":
-            card.startmove([(player.hand_pos[1],player.hand_pos[0]+card_dim[0]*(len(player.hand)-1))],[30])
-        elif hand_fill_type == "right":
-            card.startmove([(player.hand_pos[1],player.hand_pos[0]-card_dim[0]*(len(player.hand)-1))],[30])
-        elif hand_fill_type == "centre":
-            card.startmove([(player.hand_pos[1],player.hand_pos[0]+(card_dim[0]*(len(player.hand)-1))-(len(player.hand)*cut_dim[0])/2)],[30])
-        card.owned_by=player
+        if len(player.hand) != hand_size_limit:
+            if override == None:
+                card=draw_from.pop()
+            else:
+                card=override
+            player.hand.append(card)
+            card_list.append(card)
+            card.internal_coords=list(deck_plc_pos)
+            if hand_fill_type == "left":
+                card.startmove([(player.hand_pos[0]+card_dim[0]*(len(player.hand)-1),player.hand_pos[1])],[30])
+            elif hand_fill_type == "right":
+                card.startmove([(player.hand_pos[0]-card_dim[0]*(len(player.hand)-1),player.hand_pos[1])],[30])
+            elif hand_fill_type == "centre":
+                card.startmove([(player.hand_pos[0]+(card_dim[0]*(len(player.hand)-1))-(len(player.hand)*cut_dim[0])/2,player.hand_pos[1])],[30])
+            card.owned_by=player
     if len(card_list) == 1:
         return card_list[0]
     else:
@@ -920,12 +951,14 @@ def execute(instr:bytes|None) -> bool|str: #executes moves on behalf of player2 
         return False
     elif instr[0] == "a": #ability used
         if instr[3] == "3":
-            player2.field[int(instr[1])].abilities[int(instr[2])].effect(origin=player2.field[int(instr[1])],target=whole_field,player=player2,loc=(player2.field[int(instr[1])].rect.x,player2.field[int(instr[1])].rect.y))
+            player2.field[int(instr[1])].abilities[int(instr[2])].use(origin=player2.field[int(instr[1])],target=whole_field,player=player2,loc=(player2.field[int(instr[1])].rect.x,player2.field[int(instr[1])].rect.y))
         elif instr[4] == "2":
-            player2.field[int(instr[1])].abilities[int(instr[2])].effect(origin=player2.field[int(instr[1])],target=player2.field[int(instr[3])],player=player2,loc=(player2.field[int(instr[1])].rect.x,player2.field[int(instr[1])].rect.y))
+            player2.field[int(instr[1])].abilities[int(instr[2])].use(origin=player2.field[int(instr[1])],target=player2.field[int(instr[3])],player=player2,loc=(player2.field[int(instr[1])].rect.x,player2.field[int(instr[1])].rect.y))
         elif instr[4] == "1":
-            player2.field[int(instr[1])].abilities[int(instr[2])].effect(origin=player2.field[int(instr[1])],target=player1.field[int(instr[3])],player=player2,loc=(player2.field[int(instr[1])].rect.x,player2.field[int(instr[1])].rect.y))
+            player2.field[int(instr[1])].abilities[int(instr[2])].use(origin=player2.field[int(instr[1])],target=player1.field[int(instr[3])],player=player2,loc=(player2.field[int(instr[1])].rect.x,player2.field[int(instr[1])].rect.y))
         return False
+    elif instr[0] == "d": #drew card
+        draw_card(player2,[],1,override=eval(all_ids[instr[1:]]))
     elif instr[0] == "p": #placed mob
         player2.add_to_field(int(instr[1]),int(instr[2])+1)
         return False
@@ -1002,6 +1035,7 @@ def p2_move(hand:list[Card],field:list[Mob|None],souls:int) -> bytes: #returns a
 def atk_check(func) -> bool: #decorator that applies to all attacks
     def atk_wrapper(**kwargs):
         global markers
+        stop=False
         if kwargs["noattack"] == False:
             result:list[bool,int,list[Card]]=list(func(**kwargs))
             if markers["forage"] > 1: #forage
@@ -1011,7 +1045,13 @@ def atk_check(func) -> bool: #decorator that applies to all attacks
                 markers["forage"]=False
             if len(result) == 2:
                 result.append([kwargs["target"]])
+            if "on action" in kwargs["origin"].items:
+                maybe=tuple(kwargs["origin"].items["on action"])
+                for subitem in maybe:
+                    stop=subitem.effect(origin=kwargs["origin"],target=kwargs["target"],player=kwargs["player"],item=subitem)
             for card in result[2]:
+                if stop == True:
+                    break
                 if "on attack" in kwargs["origin"].items:
                     maybe=tuple(kwargs["origin"].items["on attack"])
                     for subitem in maybe:
@@ -1057,25 +1097,6 @@ def psv_check(func): #decorator that applies to all passives
             #print(f"{func.__name__} used.")
         return result
     return psv_wrapper
-
-def abl_check(func):  #decorator that applies to all abilities
-    def abl_wrapper(**kwargs):
-        if kwargs["player"].player_number == 1:
-            opp=player2
-        else:
-            opp=player1
-        match=opp.field[kwargs["player"].field.index(kwargs["origin"])]
-        if "Egg Rain" in [item.name for item in denest(kwargs["origin"].items)] or (match != None and match.name == "Frog"): #egg rain and tongue snare
-            result=None
-        else:
-            result=func(**kwargs)
-            if (type(result) == bool and result == True) or (type(result) == tuple and result[0] == True):
-                temp=get_temp_text(large_font," ".join(func.__name__.split("_")).capitalize(),(250,100,250),kwargs["loc"])
-                linger_anims.append((temp[0],temp[1],0,60,"inverse down",200))
-            if type(result) == tuple:
-                result=result[1]
-        return result
-    return abl_wrapper
 
 def itm_check(func): #decorator that applies to all items
     def itm_wrapper(**kwargs):
@@ -1155,7 +1176,7 @@ def drown(**kwargs:Attack_params) -> tuple[Literal[True],int]: #attack
 @itm_check
 def egg_rain_activate(**kwargs) -> tuple[bool,int,list,str]:
     if "only_targeting" not in kwargs:
-        return (kwargs["original"][0],0,kwargs["original"][2],"break")
+        return True
     else:
         return [kwargs["origin"]]
 
@@ -1234,7 +1255,7 @@ def milk_cleanse(**kwargs): #item
     else:
         return [kwargs["target"]]
 
-@abl_check
+#abl_check
 def milk_share(**kwargs) -> bool: #ability
     result=False
     if kwargs["player"].souls >= 1:
@@ -1245,7 +1266,7 @@ def milk_share(**kwargs) -> bool: #ability
         kwargs["player"].souls -= 1
     return result
 
-@abl_check
+#abl_check
 def monkey(**kwargs) -> Literal[True]:
     global markers
     markers["monkey"]=60
@@ -1256,7 +1277,7 @@ def mystery_egg(**kwargs) -> Literal[True]: #passive: on this turn
     draw_card(kwargs["player"],kwargs["player"].deck["items"])
     return True
 
-@abl_check
+#abl_check
 def nah_id_win(**kwargs) -> Literal[True]: #ability
     if kwargs["player"].player_number == 1:
         opp=player2
@@ -1271,7 +1292,7 @@ def play_dead(**kwargs) -> Literal[True]: #passive: on death
     kwargs["player"].hand.append(kwargs["origin"].reset())
     return True
 
-@abl_check
+#abl_check
 def prime(**kwargs) -> Literal[True]: #ability
     opp=None
     if kwargs["player"].player_number == 1:
@@ -1450,7 +1471,7 @@ def warding_laser(**kwargs:Attack_params) -> tuple[Literal[False],int]: #attack
         dmg=abs(opp.field.index(kwargs["target"])-kwargs["player"].field.index(kwargs["origin"]))+1
     return False, dmg
 
-@abl_check
+#abl_check
 def witch_healing(**kwargs) -> Literal[True]: #ability
     global until_end
     if kwargs["origin"].miscs["heal_count"] == 1:
@@ -1462,7 +1483,7 @@ def witch_healing(**kwargs) -> Literal[True]: #ability
     kwargs["target"].heal(1)
     return True
 
-@abl_check
+#abl_check
 def witch_poison(**kwargs) -> Literal[True]: #ability
     global until_end
     if kwargs["origin"].miscs["poison_count"] == 1:
@@ -1474,7 +1495,7 @@ def witch_poison(**kwargs) -> Literal[True]: #ability
     kwargs["target"].status["psn"]+=1
     return True
 
-@abl_check
+#abl_check
 def wool_guard(**kwargs) -> tuple[Literal[True],Literal["break"]]|None: #ability
     if kwargs["origin"] != kwargs["target"]:
         if kwargs["origin"].proxy_for != None:
@@ -1495,7 +1516,7 @@ infofile=open(r"Assets\d_info.hex","rb")
 player_infofile=open(r"Assets\p_info.hex","rb")
 infojson:dict[str,dict]=json.loads(b.unhexlify(infofile.read()))
 playerjson:dict[str,dict]=json.loads(b.unhexlify(player_infofile.read()))
-layouts=[LayoutTile("partitioned",mjgs.render("Partitioned",True,(0,0,0)),(90,40),70,50,(930,10),(100,262),(window_dim[0]/2-mjgs.size("Partitioned")[0]/2-160,200),False,"left",(760,210),None,transform.scale(image.load(r"Assets\partitioned_preview.png"),(300,176)).convert()),LayoutTile("centred",mjgs.render("Centred",True,(0,0,0)),(400,140),90,0,(500,100),(1200,330),(window_dim[0]/2-mjgs.size("Centred")[0]/2-160,500),True,"centre",(80,250),[(730,683),(730,-100)],transform.scale(image.load(r"Assets\centred_preview.png"),(300,176)).convert())]
+layouts=[LayoutTile("partitioned",mjgs.render("Partitioned",True,(0,0,0)),(90,40),70,50,(930,10),(100,262),(window_dim[0]/2-mjgs.size("Partitioned")[0]/2-160,200),False,"left",(760,210),None,transform.scale(image.load(r"Assets\partitioned_preview.png"),(300,176)).convert()),LayoutTile("centred",mjgs.render("Centred",True,(0,0,0)),(400,140),90,0,(500,100),(1200,330),(window_dim[0]/2-mjgs.size("Centred")[0]/2-160,500),True,"centre",(80,250),[(760,683),(760,-100)],transform.scale(image.load(r"Assets\centred_preview.png"),(300,176)).convert())]
 chosen_layout_name:str=playerjson["layout"]
 chosen_layout=layouts[[layout.name for layout in layouts].index(chosen_layout_name)]
 title_img=transform.scale(image.load(r"Assets\title.png"),(842,120)).convert_alpha()
@@ -1586,6 +1607,7 @@ thinking=transform.scale(image.load(r"Assets\thinking.png"),(50,50)).convert_alp
 thinking_progress:int=0
 #ai_delay=lambda: randint(1,5)
 ai_delay=lambda: 0.5
+hand_size_limit=9
 #endregion
 
 #region variables
@@ -1602,7 +1624,7 @@ postsubturn=1 #postsubturn numbers start from 2
 attack_choosing_state=False
 HOST=''
 sock:socket.socket=''
-markers={"retry":False, "deck built":False, "do not connect":True, "start of turn called":False, "not enough souls":[0,0,0,0], "data received, proceed":False, "just chose":False, "finishable":True, "freeze":False, "fade":[0,[0,0,0],0,0,0], "game over called":False,"start of move called":False,"item stealing":(False, None),"forage":False,"monkey":0,"until end just changed":False,"concede":None,"await p2":False,"disconnecting":False,"just selected":False}
+markers={"retry":False, "deck built":False, "do not connect":True, "start of turn called":False, "not enough souls":[0,0,0,0], "data received, proceed":False, "just chose":False, "finishable":True, "freeze":False, "fade":[0,[0,0,0],0,0,0], "game over called":False,"start of move called":False,"item stealing":(False, None),"forage":False,"monkey":0,"until end just changed":False,"concede":None,"await p2":False,"disconnecting":False,"just selected":False,"uninstalling":False}
 selected=None #card displayed on the side
 selected_move=None #move that has been selected
 attack_progressing=False #is it the attack target choosing stage
@@ -1640,41 +1662,43 @@ large_image=None
 deck_plc=Item("Deck Placeholder",0,None,transform.rotate(cardback,90),deck_plc_pos,transform.rotate(cardback,90),None,card_dim_rot,'',None,None)
 whole_field=Item("THE ENTIRE FIELD!!!",0,nofunction_item,r"Assets\Whole Field.png",(fields_anchor[0],fields_anchor[1]),r"Assets\Whole Field.png","pink",(3*cut_dim[0]+3*card_spacing_x,2*cut_dim[1]+card_dim_rot[1]+2*card_spacing_y),None,None,None)
 preset_dummy=Mob("Dummy",0,999,[],[bite],{},{},"misc","plains","pink",r"Sprites\Dummy.png",(0,0),r"Cut Sprites\Dummy.png",[(987,512,1323,579)])
-axolotl=r'Mob("Axolotl",3,3,[],[bite],{"on death":play_dead},{},"aquatic","ocean","blue",r"Sprites\Axolotl.png",(0,0),r"Cut SPrites\Axolotl.png",[(57,412,393,479)])'
-bogged=r'Mob("Bogged",3,3,[],[snipe],{"on death":spore},{},"undead","swamp","blue",r"Sprites\Bogged.webp",(0,0),r"Cut Sprites\Bogged.jpg",[(57,422,393,479)])'
-bread=r'Item("Bread",1,bread_heal,r"Sprites\Bread.png",(0,0),r"Cut Sprites\Bread.png","blue",card_dim,"when played",1,"all healable")'
-cake=r'Item("Cake",2,cake_heal,r"Sprites\Cake.png",(0,0),r"Cut Sprites\Cake.png","blue",card_dim,"when played",1,"your field")'
-cow=r'Mob("Cow",3,4,[Ability(1,milk_share,"can be healed","Milk Share")],[rush],{},{},"misc","plains","blue",r"Sprites\Cow.png",(0,0),r"Cut Sprites\Cow.png",[(57,345,393,402),(57,402,393,469)])'
-chicken=r'Mob("Chicken",1,2,[],[rush],{"on this turn":mystery_egg},{},"misc","plains","blue",r"Sprites\Chicken.png",(0,0),r"Cut Sprites\Chicken.png",[(57,412,393,479)])'
-creeper=r'Mob("Creeper",2,2,[Ability(0,prime,"player2 field","Prime")],[],{},{},"misc","cavern","blue",r"Sprites\Creeper.png",(0,0),r"Cut Sprites\Creeper.png",[(57,345,393,452)],prime_status=0)'
-drowned=r'Mob("Drowned",2,4,[],[drown],{},{},"aquatic","ocean","blue",r"Sprites\Drowned.png",(0,0),r"Cut Sprites\Drowned.png",[(57,397,393,464)])'
-dummy=r'Mob("Dummy",0,999,[],[bite],{},{},"misc","plains","pink",r"Sprites\Dummy.png",(0,0),r"Cut Sprites\Dummy.png",[(57,412,393,479)])'
-elder=r'Mob("Elder",6,6,[],[warding_laser],{"end of turn":elders_curse},{},"aquatic","ocean","pink",r"Sprites\Elder.png",(0,0),r"Cut Sprites\Elder.png",[(57,422,393,489)])'
-egg_rain=r'Item("Egg Rain",1,egg_rain_activate,r"Sprites\Egg Rain.png",(0,0),r"Cut Sprites\Egg Rain.png","blue",card_dim,"on attack",1,"opp field")'
-frog=r'Mob("Frog",2,3,[],[tongue_whip],{},{},"aquatic","swamp","blue",r"Sprites\Frog.png",(0,0),r"Cut Sprites\Frog.png",[(57,412,393,479)])'
-goat_horn=r'Item("Goat Horn",3,goat_horn_bounce,r"Sprites\Goat Horn.png",(0,0),r"Cut Sprites\Goat Horn.png","pink",card_dim,"when played",1,"special: goat horn")'
-guardian=r'Mob("Guardian",4,3,[],[eye_laser],{"on hurt":thorn_body},{},"aquatic","ocean","blue",r"Sprites\Guardian.png",(0,0),r"Cut Sprites\Guardian.png",[(57,402,393,469)])'
-horse=r'Mob("Horse",4,5,[],[bite],{"special: quick strike":quick_strike},{},"misc","plains","pink",r"Sprites\Horse.png",(0,0),r"Cut Sprites\Horse.png",[(57,412,393,479)])'
-loot_chest=r'Item("Loot Chest",0,loot_chest_draw,r"Sprites\Loot Chest.png",(0,0),r"Cut Sprites\Loot Chest.png","blue",card_dim,"when played",1,"whole field")'
-milk=r'Item("Milk",2,milk_cleanse,r"Sprites\Milk.png",(0,0),r"Cut Sprites\Milk.png","blue",card_dim,"when played",1,"your field")'
-muddy_pig=r'Mob("Muddy Pig",2,3,[],[rush],{"on this turn":forage},{},"misc","plains","blue",r"Sprites\Muddy Pig.png",(0,0),r"Cut Sprites\Muddy Pig.png",[(57,412,393,479)])'
-pufferfish=r'Item("Pufferfish",2,puffer_poison,r"Sprites\Pufferfish.png",(0,0),r"Cut Sprites\Pufferfish.png","blue",card_dim,"when played",1,"whole field")'
-satoru_gojo='Mob("Satoru Gojo",9,20,[Ability(0,nah_id_win,"whole field","Nah, I\'d Win")],[purple],{"on hurt":infinity},{},"misc","plains","pink",r"Sprites\\Satoru Gojo.png",(0,0),r"Cut Sprites\\Satoru Gojo.png",[(57,402,393,454),(57,454,393,514)])'
-sheep=r'Mob("Sheep",3,4,[Ability(0,wool_guard,"can proxy","Wool Guard")],[rush],{},{},"misc","plains","blue",r"Sprites\Sheep.png",(0,0),r"Cut Sprites\Sheep.png",[(57,347,393,399),(57,399,393,454)])'
-shield=r'Item("shield",2,shield_protect,r"Sprites\Shield.png",(0,0),r"Cut Sprites\Shield.png","blue",card_dim,"on hurt",1,"your field")'
-skeleton=r'Mob("Skeleton",2,3,[],[snipe],{"on hurt":undead},{},"undead","cavern","blue",r"Sprites\Skeleton.png",(0,0),r"Cut Sprites\Skeleton.png",[(57,412,393,469)])'
-slime=r'Mob("Slime",3,4,[],[squish],{"on death":split},{},"misc","swamp","blue",r"Sprites\Slime.png",(0,0),r"Cut Sprites\Slime.png",[(57,437,393,509)],rotation=0)'
-spider=r'Mob("Spider",1,2,[],[spider_bite],{},{},"arthropod","cavern","blue",r"Sprites\Spider.png",(0,0),r"Cut Sprites\Spider.png",[(57,412,393,469)])'
-sunken=r'Mob("Sunken",2,3,[],[snipe],{},{},"aquatic","ocean","blue",r"Sprites\Sunken.png",(0,0),r"Cut Sprites\Sunken.png",[(57,397,393,454)])'
-sword=r'Item("Sword",1,sword_slash,r"Sprites\Sword.png",(0,0),r"Cut Sprites\Sword.png","blue",card_dim,"on attack",1,"your field")'
-toji=r'Mob("Toji",9,20,[Ability(0,monkey,"whole field","Monkey!")],[knife_thing],{"always":child_support_avoider},{},"undead","plains","pink",r"Sprites\Toji.png",(0,0),r"Cut Sprites\Toji.png",[(57,397,393,454),(57,454,393,514)])'
-trident=r'Item("Trident",2,trident_stab,r"Sprites\Trident.png",(0,0),r"Cut SPrites\Trident.png","pink",card_dim,"on attack",1,"your field")'
-witch=r'Mob("Witch",3,4,[Ability(1,witch_poison,"player2 field","Poison"),Ability(1,witch_healing,"player1 field","Heal")],[],{"end this turn":self_aid},{},["human"],"swamp","blue",r"Sprites\Witch.png",(0,0),r"Cut Sprites\Witch.png",[(57,397,393,469),(57,469,393,539)],poison_count=0,heal_count=0)'
-zombie=r'Mob("Zombie",2,4,[],[bite],{"on hurt":undead},{},"undead","cavern","blue",r"Sprites\Zombie.png",(0,0),r"Cut Sprites\Zombie.png",[(57,412,393,479)])'
+axolotl=r'Mob("Axolotl",3,3,[],[bite],{"on death":play_dead},{},"aquatic","ocean","blue",r"Sprites\Axolotl.png",(0,0),r"Cut SPrites\Axolotl.png",[(57,412,393,479)],1)'
+bogged=r'Mob("Bogged",3,3,[],[snipe],{"on death":spore},{},"undead","swamp","blue",r"Sprites\Bogged.webp",(0,0),r"Cut Sprites\Bogged.jpg",[(57,422,393,479)],2)'
+bread=r'Item("Bread",1,bread_heal,r"Sprites\Bread.png",(0,0),r"Cut Sprites\Bread.png","blue",card_dim,"when played",1,"all healable",3)'
+cake=r'Item("Cake",2,cake_heal,r"Sprites\Cake.png",(0,0),r"Cut Sprites\Cake.png","blue",card_dim,"when played",1,"your field",4)'
+cow=r'Mob("Cow",3,4,[Ability(1,milk_share,"can be healed","Milk Share")],[rush],{},{},"misc","plains","blue",r"Sprites\Cow.png",(0,0),r"Cut Sprites\Cow.png",[(57,345,393,402),(57,402,393,469)],5)'
+chicken=r'Mob("Chicken",1,2,[],[rush],{"on this turn":mystery_egg},{},"misc","plains","blue",r"Sprites\Chicken.png",(0,0),r"Cut Sprites\Chicken.png",[(57,412,393,479)],6)'
+creeper=r'Mob("Creeper",2,2,[Ability(0,prime,"player2 field","Prime")],[],{},{},"misc","cavern","blue",r"Sprites\Creeper.png",(0,0),r"Cut Sprites\Creeper.png",[(57,345,393,452)],7,prime_status=0)'
+drowned=r'Mob("Drowned",2,4,[],[drown],{},{},"aquatic","ocean","blue",r"Sprites\Drowned.png",(0,0),r"Cut Sprites\Drowned.png",[(57,397,393,464)],8)'
+dummy=r'Mob("Dummy",0,999,[],[bite],{},{},"misc","plains","pink",r"Sprites\Dummy.png",(0,0),r"Cut Sprites\Dummy.png",[(57,412,393,479)],9)'
+elder=r'Mob("Elder",6,6,[],[warding_laser],{"end of turn":elders_curse},{},"aquatic","ocean","pink",r"Sprites\Elder.png",(0,0),r"Cut Sprites\Elder.png",[(57,422,393,489)],10)'
+egg_rain=r'Item("Egg Rain",1,egg_rain_activate,r"Sprites\Egg Rain.png",(0,0),r"Cut Sprites\Egg Rain.png","blue",card_dim,"on action",1,"opp field",11)'
+frog=r'Mob("Frog",2,3,[],[tongue_whip],{},{},"aquatic","swamp","blue",r"Sprites\Frog.png",(0,0),r"Cut Sprites\Frog.png",[(57,412,393,479)],12)'
+goat_horn=r'Item("Goat Horn",3,goat_horn_bounce,r"Sprites\Goat Horn.png",(0,0),r"Cut Sprites\Goat Horn.png","pink",card_dim,"when played",1,"special: goat horn",13)'
+guardian=r'Mob("Guardian",4,3,[],[eye_laser],{"on hurt":thorn_body},{},"aquatic","ocean","blue",r"Sprites\Guardian.png",(0,0),r"Cut Sprites\Guardian.png",[(57,402,393,469)],14)'
+horse=r'Mob("Horse",4,5,[],[bite],{"special: quick strike":quick_strike},{},"misc","plains","pink",r"Sprites\Horse.png",(0,0),r"Cut Sprites\Horse.png",[(57,412,393,479)],15)'
+loot_chest=r'Item("Loot Chest",0,loot_chest_draw,r"Sprites\Loot Chest.png",(0,0),r"Cut Sprites\Loot Chest.png","blue",card_dim,"when played",1,"whole field",16)'
+milk=r'Item("Milk",2,milk_cleanse,r"Sprites\Milk.png",(0,0),r"Cut Sprites\Milk.png","blue",card_dim,"when played",1,"your field",17)'
+muddy_pig=r'Mob("Muddy Pig",2,3,[],[rush],{"on this turn":forage},{},"misc","plains","blue",r"Sprites\Muddy Pig.png",(0,0),r"Cut Sprites\Muddy Pig.png",[(57,412,393,479)],18)'
+pufferfish=r'Item("Pufferfish",2,puffer_poison,r"Sprites\Pufferfish.png",(0,0),r"Cut Sprites\Pufferfish.png","blue",card_dim,"when played",1,"whole field",19)'
+satoru_gojo='Mob("Satoru Gojo",9,20,[Ability(0,nah_id_win,"whole field","Nah, I\'d Win")],[purple],{"on hurt":infinity},{},"misc","plains","pink",r"Sprites\\Satoru Gojo.png",(0,0),r"Cut Sprites\\Satoru Gojo.png",[(57,402,393,454),(57,454,393,514)],20)'
+sheep=r'Mob("Sheep",3,4,[Ability(0,wool_guard,"can proxy","Wool Guard")],[rush],{},{},"misc","plains","blue",r"Sprites\Sheep.png",(0,0),r"Cut Sprites\Sheep.png",[(57,347,393,399),(57,399,393,454)],21)'
+shield=r'Item("shield",2,shield_protect,r"Sprites\Shield.png",(0,0),r"Cut Sprites\Shield.png","blue",card_dim,"on hurt",1,"your field",22)'
+skeleton=r'Mob("Skeleton",2,3,[],[snipe],{"on hurt":undead},{},"undead","cavern","blue",r"Sprites\Skeleton.png",(0,0),r"Cut Sprites\Skeleton.png",[(57,412,393,469)],23)'
+slime=r'Mob("Slime",3,4,[],[squish],{"on death":split},{},"misc","swamp","blue",r"Sprites\Slime.png",(0,0),r"Cut Sprites\Slime.png",[(57,437,393,509)],24,rotation=0)'
+spider=r'Mob("Spider",1,2,[],[spider_bite],{},{},"arthropod","cavern","blue",r"Sprites\Spider.png",(0,0),r"Cut Sprites\Spider.png",[(57,412,393,469)],25)'
+sunken=r'Mob("Sunken",2,3,[],[snipe],{},{},"aquatic","ocean","blue",r"Sprites\Sunken.png",(0,0),r"Cut Sprites\Sunken.png",[(57,397,393,454)],26)'
+sword=r'Item("Sword",1,sword_slash,r"Sprites\Sword.png",(0,0),r"Cut Sprites\Sword.png","blue",card_dim,"on attack",1,"your field",27)'
+toji=r'Mob("Toji",9,20,[Ability(0,monkey,"whole field","Monkey!")],[knife_thing],{"always":child_support_avoider},{},"undead","plains","pink",r"Sprites\Toji.png",(0,0),r"Cut Sprites\Toji.png",[(57,397,393,454),(57,454,393,514)],28)'
+trident=r'Item("Trident",2,trident_stab,r"Sprites\Trident.png",(0,0),r"Cut SPrites\Trident.png","pink",card_dim,"on attack",1,"your field",29)'
+witch=r'Mob("Witch",3,4,[Ability(1,witch_poison,"player2 field","Poison"),Ability(1,witch_healing,"player1 field","Heal")],[],{"end this turn":self_aid},{},["human"],"swamp","blue",r"Sprites\Witch.png",(0,0),r"Cut Sprites\Witch.png",[(57,397,393,469),(57,469,393,539)],30,poison_count=0,heal_count=0)'
+zombie=r'Mob("Zombie",2,4,[],[bite],{"on hurt":undead},{},"undead","cavern","blue",r"Sprites\Zombie.png",(0,0),r"Cut Sprites\Zombie.png",[(57,412,393,479)],31)'
 #Mob()
 #endregion
 
 #region deck stuff
+all_cards=[axolotl,bogged,bread,cake,cow,chicken,creeper,drowned,dummy,elder,egg_rain,frog,goat_horn,guardian,horse,loot_chest,milk,muddy_pig,pufferfish,satoru_gojo,sheep,shield,skeleton,slime,spider,sunken,sword,toji,trident,witch,zombie]
+all_ids={card.id_num:card for card in [eval(card) for card in all_cards]}
 tiles:list[dict[str,Tile]]=[{all_cut_names[i][j]:Tile(all_cut_names[i][j],all_cut_fulls[i][j],all_cut[i][j],type(eval(eval(all_cut_names[i][j]))).__name__,eval(eval(all_cut_names[i][j])).border,all_cut_rects[i][j]) for j in range(len(all_cut[i]))} for i in range(len(all_cut))]
 d_tiles:dict[str,Tile]={}
 for sub in tiles:
@@ -1704,7 +1728,7 @@ ip_submit_text=ClickableText(mjgs,"Connect",(0,0,0),(window_dim[0]/2-mjgs.size("
 pregame_text=mjgs.render("Loading...",True,(0,0,0))
 retry_text=mjgs.render("Retry Connection",True,(255,0,0))
 game_plc_text=mjgs.render("Await further programming",True,(0,0,0))
-win_text=large_font.render("You won!",True,(30,150,20))
+win_text=large_font.render("You won!",True,(240,140,240))
 lose_text=large_font.render("You lost...",True,(255,0,0))
 skill_issue_text=small_font.render("skill issue",True,(255,255,255))
 tie_text=large_font.render("You tied!",True,(255,255,0))
@@ -1737,6 +1761,14 @@ settings_back_text=ClickableText(mjgs,"Back",(0,0,0),(window_dim[0]/2-mjgs.size(
 playername_text=mjgs.render(f"Name: {playername}",True,(0,0,0))
 cardbg_change_text=ClickableText(mjgs,"Change card back",(0,0,0),(window_dim[0]/2-mjgs.size("Change card back")[0]/2,300))
 change_game_layout_text=ClickableText(mjgs,"Change game layout",(0,0,0),(window_dim[0]/2-mjgs.size("Change game layout")[0]/2,500))
+connecting_back_text=ClickableText(mjgs,"Back",(0,0,0),(window_dim[0]/2-mjgs.size("Back")[0]/2,810))
+uninstall_text=ClickableText(mjgs,"Uninstall",(255,0,0),(window_dim[0]/2-mjgs.size("Uninstall")[0]/2,600))
+uninstall_warn_text_1=mjgs.render("Warning: Uninstalling is permanent.",True,(0,0,0))
+uninstall_warn_text_2=mjgs.render("Your files will not be recoverable from the Recycle Bin.",True,(0,0,0))
+uninstall_warn_text_3=mjgs.render("Do you want to proceed?",True,(0,0,0))
+uninstall_cancel_text=ClickableText(mjgs,"No",(0,255,0),(window_dim[0]/3-mjgs.size("No")[0]/2,550))
+uninstall_confirm_text=ClickableText(mjgs,"Yes",(255,0,0),(2*window_dim[0]/3-mjgs.size("Yes")[0]/2,550))
+uninstalling_text=large_font.render("Uninstalling...",True,(0,0,0))
 #endregion
 
 while running:
@@ -1757,9 +1789,19 @@ while running:
         markers["await p2"]=temp
     sockinfo="g".encode()
     sock_write="g"
+    if markers["uninstalling"]:
+        all_entries=os.scandir(os.getcwd())
+        folders=[entry.path for entry in all_entries if entry.is_dir()]
+        files=[entry.path for entry in all_entries if not entry.is_dir()]
+        files.pop(files.index(__file__))
+        for folder in folders:
+            rmtree(folder)
+        for file in files:
+            os.remove(file)
+        rmtree(os.getcwd())
 
     for e in event.get():
-        if e.type == QUIT:
+        if e.type == QUIT and not markers["uninstalling"]:
             infofile.close()
             infofile=open(r"Assets\d_info.hex","wb")
             final_json={x[0]:x[1] for x in [preset.to_dict() for preset in deck_presets]}
@@ -1776,7 +1818,7 @@ while running:
             running=False
         elif e.type == MOUSEBUTTONUP and state not in game_overs and not markers["freeze"] and not markers["await p2"]:
             pos:Coord=mouse.get_pos()
-            if settings_button[1].collidepoint(pos):
+            if settings_button[1].collidepoint(pos) and selected_deck == None and not markers["uninstalling"]:
                 if state == "settings":
                     state = last_screen
                     subsetting=None
@@ -1796,13 +1838,15 @@ while running:
                         connect_state="hosting"
                 elif connect_text.textrect.collidepoint(pos):
                     connect_state="connecting"
-                elif ip_submit_text.textrect.collidepoint(pos) and state == "menu" and connect_state == "connecting":
+                elif ip_submit_text.textrect.collidepoint(pos) and connect_state == "connecting":
                     try:
                         sock.connect((HOST,PORT))
                         state="pregame" #await info to build player2
                         print("Connection successful")
                     except:
                         markers["retry"]=True
+                elif connecting_back_text.textrect.collidepoint(pos) and connect_state == "connecting":
+                    connect_state="idle"
                 elif decks_text.textrect.collidepoint(pos):
                     state="deck screen"
 
@@ -1826,6 +1870,8 @@ while running:
                         subsetting="cardbg"
                     elif change_game_layout_text.textrect.collidepoint(pos):
                         subsetting="layout"
+                    elif uninstall_text.textrect.collidepoint(pos):
+                        subsetting="uninstall"
                 elif subsetting == "profile":
                     if name_change_text.textrect.collidepoint(pos):
                         name_changing=True
@@ -1856,6 +1902,11 @@ while running:
                             subturn_indic_pos=layout.subturn_indic_pos
                             deck_plc=Item("Deck Placeholder",0,None,transform.rotate(cardback,90),deck_plc_pos,transform.rotate(cardback,90),None,card_dim_rot,'',None,None)
                             whole_field=Item("THE ENTIRE FIELD!!!",0,nofunction_item,r"Assets\Whole Field.png",(fields_anchor[0],fields_anchor[1]),r"Assets\Whole Field.png","pink",(3*cut_dim[0]+3*card_spacing_x,2*cut_dim[1]+card_dim_rot[1]+2*card_spacing_y),None,None,None)
+                elif subsetting == "uninstall":
+                    if uninstall_cancel_text.textrect.collidepoint(pos):
+                        subsetting=None
+                    elif uninstall_confirm_text.textrect.collidepoint(pos):
+                        markers["uninstalling"]=True
 
             elif state == "deck screen":
                 if decks_to_menu_text.textrect.collidepoint(pos):
@@ -2042,7 +2093,8 @@ while running:
                                 if (counter == True or counter == other_counter) and len(target.moveset) > 0:
                                     card.moveset[0](origin=target,target=selected,player=player2,noattack=False)
                             else:
-                                result=selected_move.effect(origin=selected,target=target,player=player1,loc=(selected.rect.x,selected.rect.y+cut_dim[1]/2))
+                                #result=selected_move.effect(origin=selected,target=target,player=player1,loc=(selected.rect.x,selected.rect.y+cut_dim[1]/2))
+                                result=selected_move.use(origin=selected,target=target,player=player1,loc=(selected.rect.x,selected.rect.y+cut_dim[1]/2))
                             if large_hideable:
                                 hide_large=True
                             if until_end == 0:
@@ -2173,7 +2225,7 @@ while running:
                 attack_choosing_state=False
                 HOST=''
                 sock=''
-                markers={"retry":False, "deck built":False, "do not connect":True, "start of turn called":False, "not enough souls":[0,0,0,0], "data received, proceed":False, "just chose":False, "finishable":True, "freeze":False, "game over called":False, "fade":[0,[0,0,0],0,0,0], "start of move called":False,"item stealing":(False, None),"forage":False,"monkey":0,"until end just changed":False,"concede":None,"await p2":False,"disconnecting":False,"hide large":False,"just selected":False}
+                markers={"retry":False, "deck built":False, "do not connect":True, "start of turn called":False, "not enough souls":[0,0,0,0], "data received, proceed":False, "just chose":False, "finishable":True, "freeze":False, "game over called":False, "fade":[0,[0,0,0],0,0,0], "start of move called":False,"item stealing":(False, None),"forage":False,"monkey":0,"until end just changed":False,"concede":None,"await p2":False,"disconnecting":False,"hide large":False,"just selected":False,"uninstalling":False}
                 selected=None
                 hide_large=False
                 selected_move=None
@@ -2190,8 +2242,8 @@ while running:
             if e.key==K_p:
                 print(str(mouse.get_pos()))
                 coord_tooltip= not coord_tooltip
-            elif e.key == K_n:
-                execute(p2_move(player2.hand,player2.field,player2.souls))
+            '''elif e.key == K_n:
+                execute(p2_move(player2.hand,player2.field,player2.souls))'''
             if connect_state == "connecting":
                 if e.key == K_BACKSPACE:
                     HOST = HOST[:-1]
@@ -2241,6 +2293,7 @@ while running:
             draw.rect(screen,(255,255,255),Rect(300,625,900,100))
             screen.blit(mjgs.render(HOST,True,(0,0,0)),(325,650))
             screen.blit(ip_submit_text.text, ip_submit_text.position)
+            screen.blit(connecting_back_text.text,connecting_back_text.position)
             if markers["retry"] == True:
                 screen.blit(retry_text,(window_dim[0]/2-mjgs.size("Retry Connection")[0]/2,400))
 
@@ -2539,6 +2592,7 @@ while running:
                 screen.blit(to_bg_cstm_text.text,to_bg_cstm_text.position)
                 screen.blit(cardbg_change_text.text,cardbg_change_text.position)
                 screen.blit(change_game_layout_text.text,change_game_layout_text.position)
+                screen.blit(uninstall_text.text,uninstall_text.position)
             elif subsetting == "profile":
                 screen.blit(name_change_text.text,name_change_text.position)
                 screen.blit(playername_text,(250,150))
@@ -2551,7 +2605,17 @@ while running:
             elif subsetting == "layout":
                 for layout in layouts:
                     layout.display()
-    screen.blit(settings_button[0],settings_button[1])
+            elif subsetting == "uninstall":
+                if not markers["uninstalling"]:
+                    screen.blit(uninstall_warn_text_1,(window_dim[0]/2-uninstall_warn_text_1.get_width()/2,200))
+                    screen.blit(uninstall_warn_text_2,(window_dim[0]/2-uninstall_warn_text_2.get_width()/2,300))
+                    screen.blit(uninstall_warn_text_3,(window_dim[0]/2-uninstall_warn_text_3.get_width()/2,400))
+                    screen.blit(uninstall_cancel_text.text,uninstall_cancel_text.position)
+                    screen.blit(uninstall_confirm_text.text,uninstall_confirm_text.position)
+                else:
+                    screen.blit(uninstalling_text,(window_dim[0]/2-uninstalling_text.get_width()/2,window_dim[1]/2))
+    if selected_deck == None:
+        screen.blit(settings_button[0],settings_button[1])
     if markers["disconnecting"]:
         disconnect_cd -= 1
     else:
@@ -2578,17 +2642,11 @@ while running:
     1. Figure out how to unblock hosting socket
     2. Does item application count as a subturn?
     3. Get item stealing to work
-    4. HOLD: Don't constantly load images, only do it when selected changes
-    5. HOLD: Implement setting colour for decks
-    6. Items and hand cards start compressing if there are too many
-    7. Write docs (already feeling the effects of no docs)
-    8. Might need to flip player 1 and 2 in execute() (since from the opponent's perspective, they are player 1 and you are player 2, but from your perspective its flipped)
-    9. Change ability activating system to call Ability instead, so a proper name instead of a cheesed one can be displayed
-    10. Lose on deck out, or maybe after a turn timer ends (timer starts on deck out)
-    11. Add card draw info to communication format (since both players have different decks)
-    12. Add uninstall feature
+    4. HOLD: Implement setting colour for decks
+    5. Might need to flip player 1 and 2 in execute() (since from the opponent's perspective, they are player 1 and you are player 2, but from your perspective its flipped)
+    6. Lose on deck out, or maybe after a turn timer ends (timer starts on deck out)
+    7. Add uninstall feature
 
     Bugs:
-    1. Colour wheel png is not actually transparent
-    2. Egg rain does not work for abilities
+    1. Player 2 can sometimes choose None mobs to add items to, which causes a crash
     '''

@@ -8,7 +8,7 @@
 "end this turn": Called immediately after this mob's move
 "when played": Called immediately
 "always": Checks all the time
-"on action": Called when a passive, ability, or attack activates (to be implemented for egg rain)
+"on action": Called when an ability, or attack activates
 
 # Effect format and return requirements
 ## Attacks:
@@ -85,13 +85,16 @@ Only_targeting is a boolean value specifying if only the target list should be r
 Original/damage is the damage being dealt.
     Damage is used in "on hurt" items, while original is used in "on attack" items. Don't ask me why. Its probably going to cause trouble in the future.
 
-Items return no values or one value: {[0]:list} and {[1]:list[bool,int,list]}.
+Items return none to two values or one value: {[0]:list} or {[1]:list[bool,int,list]}.
 [0] is a list of the item's targets.
     The effect is executed on all of them. Only returned if only_targeting is True. Can be [None] if the item is not executed on a card (e.g. Loot Chest)
 [1] is the modified original value, composed of whether the attack is melee or ranged, its damage and its targets.
     Used only by "on attack" items.
     A fourth value is sometimes added. The presence of this value causes the item scanning routine to break.
     itm_check() uses this as the new attack value for the current card.
+
+Items that stop execution of the rest of the check only return one value.
+If True, the check stops, otherwise it doesn't.
 
 # Certain variables
 ## linger_anims
@@ -111,6 +114,7 @@ The instruction string is usually made of up to 5 characters: [0][1][2][3][4].
     "c" indicates the player has conceded or exited.
     "m/i/a/p" indicates the player has used a card.
     "g" indicates the opponent is still connected
+    "d" indicates a card has been drawn.
     "x" indicates the player has no moves and to proceed
 If [0]="n", the following information is the name.
 If [0]="c", there is no following information.
@@ -134,6 +138,7 @@ If [0]="g", there is no following information.
     In the abscence of commands, "g" is constantly written to the socket.
     If nothing is received, a countdown is started.
     If at the end of the countdown, still nothing is received, it is assumed the opponent has disconencted and the game ends with them conceding.
+If [0]="d", the following one to two characters are the id number of the card that was drawn.
 If [0]="x", there is no following information.
 Note that the only information communicated is the player's direct action.
 Any passives, items, etc. that activate are handled by the client.
