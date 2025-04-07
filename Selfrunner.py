@@ -1,3 +1,5 @@
 import os
+from contextlib import chdir
 
-os.system("python3 Minecards.py")
+with chdir(os.path.dirname(os.path.realpath(__file__))):
+    os.system("python3 Minecards.py")

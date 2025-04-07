@@ -152,4 +152,19 @@ If it is in the field, a random move or ability is chosen from its moveset. If a
 
 If the card is an item, if it can be afforded, it is placed onto a random targetable mob. If it is too expensive, the check fails.
 
-# Code routes
+# Connectivity
+## Process
+Every game loop, [select.select()] is called on [sock], if available.
+If readable, the contents are written to [sockinfo].
+If writable, [sock_write] is written to it.
+If an exception has occurred, an error is raised.
+
+Regardless, [execute()] is called.
+If a bool is returned, markers["await p2"] is set to it. This tells the game if player2 has made a move.
+Lastly, [sockinfo] and [sock_write] are both set to "g".
+
+Thus, unless [sockinfo] or [sock_write] are changed in the game loop, they will always be "g".
+
+As for disconnecting, every frame markers["disconnecting"] is True, [disconnect_cd] goes down by one. If at any point it is False, it is reset.
+If 600 frames have elapsed while it is True, the opponent is taken as having conceded.
+markers["disconnecting"] is set to true if player2 is being awaited and the input foe [execute()] is "g". It cannot be "" since [sock_write] is always set to "g" unless anything happens.

@@ -1,29 +1,55 @@
 import socket
 import select
-import os
+import sys
+import traceback as tb
 
-HOST = "127.0.0.1"  # Standard loopback interface address (localhost)
-PORT = 65432  # Port to listen on (non-privileged ports are > 1023)
+HOST = "172.20.102.211"
+PORT = 0
+sock=''
 
-'''
-Steps to make host socket:
-1. Make socket object: s=socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-2. Bind: s.bind((HOST, PORT))
-3. Start listening: s.listen()
-4. Start accepting connections (blocks until a connection is accepted): s.accept()
+def excepthook(type, value, traceback):
+    global sock
+    temp=tb.format_tb(traceback)
+    print(type.__name__)
+    print(value)
+    for i in range(len(temp)):
+        print(f"{temp[i]}\n")
+    sock.close()
 
-Notes:
- - Send info over the socket: s.send(b), b is a bytes object
- - Blocks until sent, but this time is inconsequential for small data.
- - Receive info from the socket: s.recv(int), receives at maximum int bytes from the socket
- - Blocks until the socket has something to receive. Very problematic.
-'''
-with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-    s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    s.bind((HOST, PORT))
-    s.listen()
-    sock, addr= s.accept()
-    print(f"Accepted connection at {addr}")
-    print(s.recv(1024).decode())
-    s.send("Hello Internet".encode())
-    print(s.recv(1024).decode())
+sys.excepthook=excepthook
+sock=socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+sock.setblocking(False)
+sock.bind((HOST, PORT))
+print(f"PORT: {sock.getsockname()[1]}")
+sock.listen()
+
+while True:
+    read, write, error=select.select([sock],[sock],[sock],0)
+    if sock in read:
+        sock, addr= sock.accept()
+        break
+
+print(f"Connected: {addr}")
+
+while True:
+    double_break=False
+    read, write, error=select.select([sock],[sock],[sock],0)
+    if sock in read:
+        data=sock.recv(1024).decode()
+        if data != '':
+            data=data.split("END")
+        for datum in data:
+            if datum == "STOP":
+                double_break=True
+                break
+            if datum != '':
+                print(datum)
+    if sock in write:
+        pass
+    if sock in error:
+        raise RuntimeError("Sockets, am I right?")
+    if double_break:
+        print(f"{'\033[93m'}INT_SYS: Ending connection.{'\033[0m'}")
+        sock.close()
+        break

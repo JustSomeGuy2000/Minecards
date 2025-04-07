@@ -22,7 +22,6 @@ type Size = tuple[int,int]
 type Path = str
 type Attack_params = dict[Literal["origin"]:Card,Literal["target"]:Card,Literal["damage"]:int,Literal["noattack"]:bool]
 #Name:LAPTOP-20C14P7N, Address:172.20.57.66
-#None values mean add later
 
 window_dim=(1500,850)
 screen=display.set_mode(window_dim)
@@ -847,9 +846,9 @@ def deckbuilder(list_to_use:dict[Card,int]) -> list[Card]:
     shuffle(here_deck)
     return here_deck
 
-def draw_card(player:Player,draw_from:list[Card],amount:int=1,override=None) -> list[Card]|Card: # type: ignore
+def draw_card(player:Player,draw_from:list[Card],amount:int=1,override:Card=None) -> list[Card]|Card: # type: ignore
     global hand_size_limit
-    if draw_from == []:
+    if draw_from == [] or (player == player2 and override == None and not markers["do not connect"]):
         return
     card_list=[]
     for i in range(amount):
@@ -868,6 +867,8 @@ def draw_card(player:Player,draw_from:list[Card],amount:int=1,override=None) -> 
             elif hand_fill_type == "centre":
                 card.startmove([(player.hand_pos[0]+(card_dim[0]*(len(player.hand)-1))-(len(player.hand)*cut_dim[0])/2,player.hand_pos[1])],[30])
             card.owned_by=player
+        if player == player1 and not markers["do not connect"]:
+            write_buffer.append("d"+str(card.id_num)+"END")
     if len(card_list) == 1:
         return card_list[0]
     else:
@@ -913,17 +914,14 @@ def execute(instr:bytes|None) -> bool|str: #executes moves on behalf of player2 
     global markers
     global state
     global setup
+    global player2name
     markers["disconnecting"]=False
-    if instr != None:
+    if instr != None and instr.decode() != "":
         instr:str=instr.decode()
-    if instr == None or instr == '':
-        if sock == '': #game has not started
-            return False
-        else: #potential disconnect,start countdown
-            markers["disconnecting"]=True
-            return True
-    elif instr[0] == "n": #receiving name
-        return instr[1:]
+    else:
+        return False
+    if instr[0] == "n": #receiving name
+        player2name=instr[1:]
     elif instr[0] == "c": #opponent conceded
         state="win"
         setup=False
@@ -964,6 +962,10 @@ def execute(instr:bytes|None) -> bool|str: #executes moves on behalf of player2 
         player2.add_to_field(int(instr[1]),int(instr[2])+1)
         return False
     elif instr[0] == "g": #game continuing
+        if not markers["disconnecting"] and markers["await p2"]:
+            markers["disconnecting"] == True
+        elif not markers["await p2"]:
+            markers["disconnecting"] == False
         return markers["await p2"]
     elif instr[0] == "x": #no available moves, just proceed
         return False
@@ -1517,7 +1519,7 @@ infofile=open(r"Assets\d_info.hex","rb")
 player_infofile=open(r"Assets\p_info.hex","rb")
 infojson:dict[str,dict]=json.loads(b.unhexlify(infofile.read()))
 playerjson:dict[str,dict]=json.loads(b.unhexlify(player_infofile.read()))
-layouts=[LayoutTile("partitioned",mjgs.render("Partitioned",True,(0,0,0)),(90,40),70,50,(930,10),(100,262),(window_dim[0]/2-mjgs.size("Partitioned")[0]/2-160,200),False,"left",(760,210),None,transform.scale(image.load(r"Assets\partitioned_preview.png"),(300,176)).convert()),LayoutTile("centred",mjgs.render("Centred",True,(0,0,0)),(400,140),90,0,(500,100),(1200,330),(window_dim[0]/2-mjgs.size("Centred")[0]/2-160,500),True,"centre",(80,250),[(760,683),(760,-100)],transform.scale(image.load(r"Assets\centred_preview.png"),(300,176)).convert())]
+layouts=[LayoutTile("partitioned",mjgs.render("Partitioned",True,(0,0,0)),(90,40),70,50,(930,10),(100,262),(window_dim[0]/2-mjgs.size("Partitioned")[0]/2-160,200),False,"left",(760,210),None,transform.scale(image.load(r"Assets\partitioned_preview.png"),(300,106)).convert()),LayoutTile("centred",mjgs.render("Centred",True,(0,0,0)),(400,140),90,0,(500,100),(1200,330),(window_dim[0]/2-mjgs.size("Centred")[0]/2-160,500),True,"centre",(80,250),[(760,683),(760,-100)],transform.scale(image.load(r"Assets\centred_preview.png"),(300,176)).convert())]
 chosen_layout_name:str=playerjson["layout"]
 chosen_layout=layouts[[layout.name for layout in layouts].index(chosen_layout_name)]
 title_img=transform.scale(image.load(r"Assets\title.png"),(842,120)).convert_alpha()
@@ -1550,11 +1552,11 @@ large_image_pos = chosen_layout.large_image_pos
 deck_plc_pos = chosen_layout.deck_plc_pos
 subturn_indic_pos = chosen_layout.subturn_indic_pos
 game_overs=("win", "tie", "lose")
-PORT=6543
+PORT="0"
 effect_sprites={"psn":image.load(r"Assets\psn.png").convert_alpha(),"aquatised":transform.scale(image.load(r"Assets\aquatised.png"),(23,23)).convert()}
 monkey_sprite=transform.scale(image.load(r"Assets\monkey.png"),(840*(window_dim[1]/859),window_dim[1])).convert_alpha()
 subturn_sprites=[transform.scale(image.load(r"Assets\abs_subturn_none.png"),(150,360)).convert_alpha(),transform.scale(image.load(r"Assets\abs_subturn_1.webp"),(150,360)).convert_alpha(),transform.scale(image.load(r"Assets\abs_subturn_2.webp"),(150,360)).convert_alpha(),transform.scale(image.load(r"Assets\abs_subturn_3.png"),(150,360)).convert_alpha()]
-sys.excepthook=excepthook
+#sys.excepthook=excepthook
 game_id=str(int(tm.time()))
 colour_wheel=transform.scale(image.load(r"Assets\colour_wheel.png").convert_alpha(),(70,70))
 colour_wheel_rect=Rect(window_dim[0]-90,20,70,70)
@@ -1606,8 +1608,8 @@ for i in range(len(card_bgs_raw)):
     card_bgs.append(BGTile(transform.scale(image.load(f"Assets\\Backs\\{card_bgs_raw[i].name}"),card_dim),f"Assets\\Backs\\{card_bgs_raw[i].name}",card_bgs_raw[i].name.split(".")[0].capitalize(),(50+(card_dim[0]+50)*(i%8),100+(card_dim[1]+75)*(i//8))))
 thinking=transform.scale(image.load(r"Assets\thinking.png"),(50,50)).convert_alpha()
 thinking_progress:int=0
-ai_delay=lambda: randint(1,5)
-#ai_delay=lambda: 0.5
+#ai_delay=lambda: randint(1,5)
+ai_delay=lambda: 0.5
 hand_size_limit=9
 #endregion
 
@@ -1623,9 +1625,9 @@ abs_subturn=1 #keeps track of how many subturns have passed
 abs_abs_subturn=1 #turns got a bit out of hand
 postsubturn=1 #postsubturn numbers start from 2
 attack_choosing_state=False
-HOST=''
+HOST='172.20.102.211'
 sock:socket.socket=''
-markers={"retry":False, "deck built":False, "do not connect":True, "start of turn called":False, "not enough souls":[0,0,0,0], "data received, proceed":False, "just chose":False, "finishable":True, "freeze":False, "fade":[0,[0,0,0],0,0,0], "game over called":False,"start of move called":False,"item stealing":(False, None),"forage":False,"monkey":0,"until end just changed":False,"concede":None,"await p2":False,"disconnecting":False,"just selected":False,"uninstalling":False}
+markers={"retry":False, "deck built":False, "do not connect":True, "start of turn called":False, "not enough souls":[0,0,0,0], "data received, proceed":False, "just chose":False, "finishable":True, "freeze":False, "fade":[0,[0,0,0],0,0,0], "game over called":False,"start of move called":False,"item stealing":(False, None),"forage":False,"monkey":0,"until end just changed":False,"concede":None,"await p2":False,"disconnecting":False,"just selected":False,"uninstalling":False,"name sent":False,"sock closed":False}
 selected=None #card displayed on the side
 selected_move=None #move that has been selected
 attack_progressing=False #is it the attack target choosing stage
@@ -1643,8 +1645,7 @@ coord_tooltip=False
 linger_anims:list[tuple[Surface,Coord,int,int,Literal["inverse down"]|Literal["inverse up"],int]]=[] #Surface to blit, anchor, end position, current frame, max frames,animation style.
 deck_offset=0
 last_screen=None
-sockinfo=None
-sock_write=None
+sock_read:bytes=None
 disconnect_cd=600
 name_changing=False
 subsetting=None
@@ -1655,6 +1656,10 @@ hide_large=False
 large_hideable=chosen_layout.large_hideable
 hand_fill_type=chosen_layout.hand_fill_type
 large_image=None
+read_buffer:list[bytes]=[]
+write_buffer:list[str]=[]
+player2name:str=None
+next_send_g:int=0
 #endregion
 
 #region card definitions
@@ -1721,10 +1726,8 @@ player2:Player=''
 
 #region texts
 beta_text=mjgs.render("Closed Beta",True,(255,100,0))
-host_text=ClickableText(mjgs,"Create Game",(0,0,0),(window_dim[0]/2-mjgs.size("Create Game")[0]/2,550))
 connect_text=ClickableText(mjgs,"Join Game",(0,0,0),(window_dim[0]/2-mjgs.size("Join Game")[0]/2,650))
 connecting_text=mjgs.render("Waiting for connection",True,(255,0,0))
-ip_enter_text=mjgs.render("Enter host IPv4",True,(0,0,0))
 ip_submit_text=ClickableText(mjgs,"Connect",(0,0,0),(window_dim[0]/2-mjgs.size("Connect")[0]/2,750))
 pregame_text=mjgs.render("Loading...",True,(0,0,0))
 retry_text=mjgs.render("Retry Connection",True,(255,0,0))
@@ -1770,6 +1773,8 @@ uninstall_warn_text_3=mjgs.render("Do you want to proceed?",True,(0,0,0))
 uninstall_cancel_text=ClickableText(mjgs,"No",(0,255,0),(window_dim[0]/3-mjgs.size("No")[0]/2,550))
 uninstall_confirm_text=ClickableText(mjgs,"Yes",(255,0,0),(2*window_dim[0]/3-mjgs.size("Yes")[0]/2,550))
 uninstalling_text=large_font.render("Uninstalling...",True,(0,0,0))
+singleplayer_text=ClickableText(mjgs,"Singleplayer",(0,0,0),(window_dim[0]*11/18-mjgs.size("Singleplayer")[0]/2,550))
+multiplayer_text=ClickableText(mjgs,"Multiplayer",(0,0,0),(window_dim[0]*7/18-mjgs.size("Multiplayer")[0]/2,550))
 #endregion
 
 while running:
@@ -1777,22 +1782,47 @@ while running:
     if markers["monkey"] != 0:
         screen.blit(monkey_sprite,(window_dim[0]-(markers["monkey"]/60)*window_dim[0],0))
         markers["monkey"] -= 1
-    if sock != '':
+    if type(sock) == socket.socket:
         read_ready, write_ready, error_ready=select.select([sock],[sock],[],0)
         if sock in read_ready:
-            sockinfo=sock.recv(1024)
-        if sock in write_ready:
-            sock.send(sock_write.encode())
+            if state == "menu" and connect_state == "hosting":
+                sock, addr= sock.accept()
+                print(f"{'\033[96m'}Accepted connection at {addr}{'\033[0m'}")
+                state="pregame"
+            else:
+                try:
+                    sock_read=sock.recv(1024)
+                except IOError as e:
+                    if e.errno == 10053 or e.errno == 10054:
+                        disconnect_cd=0
+                        markers["disconnecting"]=True
+                        print(f"{'\033[93m'}Err. 10053/4: Concede indicated{'\033[0m'}")
+                    else:
+                        print(f"{'\033[91m'}{str(e)}{'\033[0m'}")
+                else:
+                    for datum in sock_read.split("END".encode()):
+                        if datum != '':
+                            read_buffer.append(datum)
+                        print(read_buffer)
+        if sock in write_ready and write_buffer != []:
+            sock.send(write_buffer.pop().encode())
         if sock in error_ready:
             raise RuntimeError(f"Mom, sockets are acting up again!\n{sock.error}")
-    temp=execute(sockinfo)
+        if tm.time() > next_send_g:
+            write_buffer.append("gEND")
+            next_send_g=tm.time()+1
+    if markers["do not connect"]:
+        temp=execute(sock_read)
+        sock_read="gEND".encode()
+    elif read_buffer != []:
+        temp=execute(read_buffer.pop())
     if type(temp) == bool:
         markers["await p2"]=temp
-    sockinfo="g".encode()
-    sock_write="g"
 
     for e in event.get():
         if e.type == QUIT and not markers["uninstalling"]:
+            if type(sock) == socket.socket:
+                sock.close()
             infofile.close()
             infofile=open(r"Assets\d_info.hex","wb")
             final_json={x[0]:x[1] for x in [preset.to_dict() for preset in deck_presets]}
@@ -1817,25 +1847,48 @@ while running:
                     last_screen = state
                     state = "settings"
             elif state == "menu":
-                if host_text.textrect.collidepoint(pos):
-                    if markers["do not connect"]:
-                        if chosen_deck.usable:
-                            state="game"
-                            player2=Player("Player 2",2,hand_anchors[1],[(x_rails[0],y_rails[0]),(x_rails[1],y_rails[0]),(x_rails[2],y_rails[0])])
-                        else:
-                            linger_anims.append([deck_unusable_warning,(window_dim[0]/2-deck_unusable_warning.get_width()/2,400),0,120,"inverse down",0])
-                        player1=Player(playername,1,hand_anchors[0],[(x_rails[0],y_rails[1]),(x_rails[1],y_rails[1]),(x_rails[2],y_rails[1])])
+                if singleplayer_text.textrect.collidepoint(pos) and connect_state == "idle":
+                    markers["do not connect"]=True
+                    if chosen_deck.usable:
+                        state="game"
+                        player2=Player("Player 2",2,hand_anchors[1],[(x_rails[0],y_rails[0]),(x_rails[1],y_rails[0]),(x_rails[2],y_rails[0])])
                     else:
-                        connect_state="hosting"
-                elif connect_text.textrect.collidepoint(pos):
+                        linger_anims.append([deck_unusable_warning,(window_dim[0]/2-deck_unusable_warning.get_width()/2,400),0,120,"inverse down",0])
+                    player1=Player(playername,1,hand_anchors[0],[(x_rails[0],y_rails[1]),(x_rails[1],y_rails[1]),(x_rails[2],y_rails[1])])
+                elif multiplayer_text.textrect.collidepoint(pos) and connect_state == "idle":
+                    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                    s.connect(("8.8.8.8", 80))
+                    HOST=s.getsockname()[0]
+                    s.close()
+                    sock=socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                    sock.setblocking(False)
+                    sock.bind((HOST,int(PORT)))
+                    sock.listen()
+                    connect_state="hosting"
+                elif state == "menu" and connect_state == "connecting":
+                    if Rect(300,625,900,100).collidepoint(pos):
+                        selected="PORT"
+                    elif Rect(300,425,900,100).collidepoint(pos):
+                        selected="IP"
+                    elif ip_submit_text.textrect.collidepoint(pos) and connect_state == "connecting":
+                        try:
+                            sock.connect((HOST,int(PORT)))
+                            state="pregame" #await info to build player2
+                            print(f"{'\033[096m'}Connection successful{'\033[0m'}")
+                        except Exception as e:
+                            print(f"{'\033[91m'}{str(e)}{'\033[0m'}")
+                            if e.errno == 10035:
+                                print(f"{'\033[93m'}Err. 10035: Skipped as per regulation{'\033[0m'}")
+                                state="pregame" #await info to build player2
+                                print(f"{'\033[096m'}Connection successful{'\033[0m'}")
+                            else:
+                                markers["retry"]=True
+                elif connect_text.textrect.collidepoint(pos) and connect_state == "idle":
+                    sock=socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                    sock.setblocking(False)
                     connect_state="connecting"
-                elif ip_submit_text.textrect.collidepoint(pos) and connect_state == "connecting":
-                    try:
-                        sock.connect((HOST,PORT))
-                        state="pregame" #await info to build player2
-                        print("Connection successful")
-                    except:
-                        markers["retry"]=True
                 elif connecting_back_text.textrect.collidepoint(pos) and connect_state == "connecting":
                     connect_state="idle"
                 elif decks_text.textrect.collidepoint(pos):
@@ -2205,6 +2258,9 @@ while running:
         elif e.type == MOUSEBUTTONUP and state in game_overs:
             pos = mouse.get_pos()
             if to_menu_text.textrect.collidepoint(pos):
+                if type(sock) == socket.socket:
+                    sock.close()
+                sock=''
                 state = "menu"
                 connect_state="idle"
                 deck=[]
@@ -2217,7 +2273,7 @@ while running:
                 attack_choosing_state=False
                 HOST=''
                 sock=''
-                markers={"retry":False, "deck built":False, "do not connect":True, "start of turn called":False, "not enough souls":[0,0,0,0], "data received, proceed":False, "just chose":False, "finishable":True, "freeze":False, "game over called":False, "fade":[0,[0,0,0],0,0,0], "start of move called":False,"item stealing":(False, None),"forage":False,"monkey":0,"until end just changed":False,"concede":None,"await p2":False,"disconnecting":False,"hide large":False,"just selected":False,"uninstalling":False}
+                markers={"retry":False, "deck built":False, "do not connect":True, "start of turn called":False, "not enough souls":[0,0,0,0], "data received, proceed":False, "just chose":False, "finishable":True, "freeze":False, "game over called":False, "fade":[0,[0,0,0],0,0,0], "start of move called":False,"item stealing":(False, None),"forage":False,"monkey":0,"until end just changed":False,"concede":None,"await p2":False,"disconnecting":False,"hide large":False,"just selected":False,"uninstalling":False,"name sent":False,"sock closed":False}
                 selected=None
                 hide_large=False
                 selected_move=None
@@ -2227,8 +2283,9 @@ while running:
                 player2=''
                 player1.reset()
                 linger_anims=[]
-                sockinfo=None
-                sock_write=None
+                sock_read=None
+                read_buffer=[]
+                write_buffer=[]
         
         elif e.type==KEYDOWN:
             if e.key==K_p:
@@ -2236,11 +2293,19 @@ while running:
                 coord_tooltip= not coord_tooltip
             '''elif e.key == K_n:
                 execute(p2_move(player2.hand,player2.field,player2.souls))'''
-            if connect_state == "connecting":
+            if state == "menu" and connect_state == "connecting":
                 if e.key == K_BACKSPACE:
-                    HOST = HOST[:-1]
+                    if selected == "IP":
+                        HOST = HOST[:-1]
+                    elif selected == "PORT":
+                        PORT=PORT[:-1]
+                elif e.key == K_RETURN:
+                    selected=None
                 else:
-                    HOST += e.unicode
+                    if selected == "IP":
+                        HOST += e.unicode
+                    elif selected == "PORT":
+                        PORT += e.unicode
             '''if e.key == K_e and connect_state != "connecting" and editing_deck_title == False:
                 raise RuntimeError("User called exception.")'''
             if state == "deck screen" and selected_deck != None and editing_deck_title == True:
@@ -2258,7 +2323,8 @@ while running:
         screen.blit(title_img,(window_dim[0]/2-421,165))
         screen.blit(beta_text,(window_dim[0]/2-mjgs.size("Closed Beta")[0]/2,320))
         if connect_state == "idle":
-            screen.blit(host_text.text, host_text.position)
+            screen.blit(multiplayer_text.text,multiplayer_text.position)
+            screen.blit(singleplayer_text.text,singleplayer_text.position)
             screen.blit(connect_text.text, connect_text.position)
             screen.blit(decks_text.text, decks_text.position)
             screen.blit(menu_selected_deck_text,(950,675))
@@ -2266,28 +2332,29 @@ while running:
             screen.blit(menu_deck_selected_text,(1100-menu_deck_selected_text.get_width()/2,750))
         elif connect_state == "hosting":
             screen.blit(connecting_text,(window_dim[0]/2-mjgs.size("Waiting for connection")[0]/2,600))
-            display.update()
-            sock= socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            HOST="127.0.0.1"
-            sock.bind((HOST,PORT))
-            sock.listen()
-            try: #figure out how to unblock
-                sock, addr= sock.accept()
-                print(f"Accepted connection at {addr}")
-                state="pregame"
-            except:
-                pass
+            temp=sock.getsockname()
+            ip_text=mjgs.render("IP: "+str(temp[0]),True,(0,0,0))
+            port_text=mjgs.render("Port: "+str(temp[1]),True,(0,0,0))
+            screen.blit(ip_text,(window_dim[0]/2-ip_text.get_width()/2,400))
+            screen.blit(port_text,(window_dim[0]/2-port_text.get_width()/2,500))
         elif connect_state == "connecting":
-            sock= socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            screen.blit(ip_enter_text, (window_dim[0]/2-mjgs.size("Enter Host IPv4")[0]/2,550))
             draw.rect(screen,(255,255,255),Rect(300,625,900,100))
-            screen.blit(mjgs.render(HOST,True,(0,0,0)),(325,650))
+            draw.rect(screen,(255,255,255),Rect(300,425,900,100))
+            screen.blit(mjgs.render("IP:",True,(0,0,0)),(200,425))
+            screen.blit(mjgs.render("PORT:",True,(0,0,0)),(200,625))
+            ip_text=mjgs.render(HOST,True,(0,0,0))
+            port_text=mjgs.render(str(PORT),True,(0,0,0))
+            screen.blit(ip_text,(325,450))
+            screen.blit(port_text,(325,650))
+            if tm.time()%1>0.5:
+                if selected == "IP":
+                    draw.rect(screen,(0,0,0),Rect(ip_text.get_size()[0]+325,440,5,70))
+                elif selected == "PORT":
+                    draw.rect(screen,(0,0,0),Rect(port_text.get_size()[0]+325,640,5,70))
             screen.blit(ip_submit_text.text, ip_submit_text.position)
             screen.blit(connecting_back_text.text,connecting_back_text.position)
             if markers["retry"] == True:
-                screen.blit(retry_text,(window_dim[0]/2-mjgs.size("Retry Connection")[0]/2,400))
+                screen.blit(retry_text,(window_dim[0]/2-mjgs.size("Retry Connection")[0]/2,370))
 
     elif state == "deck screen":
         screen.blit(decks_to_menu_text.text, decks_to_menu_text.position)
@@ -2362,14 +2429,16 @@ while running:
                 selected=None
 
     elif state == "pregame":
+        markers["do not connect"]=False
         screen.blit(pregame_text,(window_dim[0]/2-mjgs.size("Loading...")[0]/2,window_dim[1]/2))
-        if sock in read_ready:
-            player2name=execute(sock.recv(4096))
-            print(f"Opp. name: {player2name}")
-            player2=Player(player2name,2,(fields_anchor[0],fields_anchor[1]/2),[(x_rails[0],y_rails[0]),(x_rails[1],y_rails[0]),(x_rails[2],y_rails[0])])
+        if player2name != None:
+            print(f"{'\033[96m'}Opp. name: {player2name}{'\033[0m'}")
+            player2=Player("Player 2",2,hand_anchors[1],[(x_rails[0],y_rails[0]),(x_rails[1],y_rails[0]),(x_rails[2],y_rails[0])])
+            selected=None
             state="game"
-        if sock in write_ready:
-            sock.send(("n"+playername).encode())
+        if not markers["name sent"]:
+            write_buffer.append("n"+playername+"END")
+            markers["name sent"]=True
 
     elif state == "game" or state in game_overs:
         if markers["deck built"] == False:
@@ -2378,8 +2447,9 @@ while running:
             deck_p2 = {"mobs":deckbuilder(decklist_p2["mobs"]),"items":deckbuilder(decklist_p2["items"])}
             turn = 1
             draw_card(player2,deck_p2["mobs"],8)
-            for i in range(3):
-                player2.add_to_field(i,i+1,True)
+            if markers["do not connect"]:
+                for i in range(3):
+                    player2.add_to_field(i,i+1,True)
             draw_card(player1,deck_p1["mobs"],8)
             markers["deck built"]=True
         if not markers["start of turn called"] and turn != 1:
@@ -2391,8 +2461,6 @@ while running:
             markers["start of turn called"]=True
         if turn == 1:
             player1.souls = 10
-        if not markers["do not connect"]:
-            screen.blit(game_plc_text,(window_dim[0]/2-mjgs.size("Await further programming")[0]/2,window_dim[1]/2))
         screen.blit(deck_plc.current_sprite,(deck_plc.rect.x,deck_plc.rect.y))
         screen.blit(whole_field.current_sprite,(fields_anchor[0],fields_anchor[1]))
         if setup == True or abs_subturn > 2:
@@ -2517,6 +2585,10 @@ while running:
         screen.blit(mjgs.render(f"Abs:{str(abs_subturn)}, Sub:{str(subturn)}",True,(255,255,255)),(0,0))
 
     if state in game_overs:
+        if not markers["sock closed"] and not markers["do not connect"]:
+            sock.close()
+            sock=''
+            markers["sock closed"]=True
         colourval = markers["fade"][1]+[markers["fade"][3]]
         temps=Surface(window_dim).convert_alpha()
         temps.set_alpha(markers["fade"][3])
@@ -2612,7 +2684,7 @@ while running:
         disconnect_cd -= 1
     else:
         disconnect_cd=600
-    if disconnect_cd == 0:
+    if disconnect_cd <= 0:
         state="win"
         setup=False
         markers["concede"]="opp"
