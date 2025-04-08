@@ -427,6 +427,7 @@ class Player():
                 markers["not enough souls"][0] -= 1
 
     def add_to_field(self,card:int,pos:int,ignore_cost:bool=False,card_override=None,pos_override=None): #card is index number of hand card to take, pos is field position to take (in human number terms, not list index)
+        global write_buffer
         if card_override == None:
             target=self.hand.pop(card)
         else:
@@ -454,6 +455,48 @@ class Player():
                     true_target=pos_override
                 target.placed_on=true_target
                 target.effect(target=true_target, origin=target, player=self, item=target)
+
+    def add_to_field_new(self,targeting:Literal["self"]|Literal["opp"]|Literal["field"],card:int|Card,fieldpos:int,ignore_cost:bool=False):
+        if targeting == "self":
+            player=self
+        elif targeting == "opp":
+            if self == player1:
+                player=player2
+            else:
+                player=player1
+        elif targeting != "field":
+            raise ValueError(f"Invalid argument for targeting: {targeting}")
+        
+        if type(card) == int:
+            target=self.hand.pop(card)
+        elif type(card) == Card:
+            target=card
+        else:
+            raise TypeError(f"Invalid argument for card: {card}")
+        
+        if type(target) == Mob:
+            player.field[fieldpos]=target
+            target.switch_sprite("cut")
+            target.startmove([(player.field_pos[fieldpos][0], player.field_pos[fieldpos][1]+copysign(cut_dim[1],1.5-player.player_number))],[0])
+            target.startmove([player.field_pos[fieldpos]],[15])
+            if not ignore_cost:
+                self.souls -= target.cost
+        else:
+            if target.condition != "when played":
+                temp=copy.copy([target.rect.x, target.rect.y])
+                player.field[fieldpos].add_item(target)
+                target.placed_on=player.field[fieldpos]
+                target.switch_sprite("cut")
+                target.internal_coords=temp
+                target.startmove([(player.field[fieldpos].rect.x+cut_dim[0]*2/3, player.field[fieldpos].rect.y+item_dim[1]*denest(player.field[fieldpos].items).index(target))],[30])
+                if not ignore_cost:
+                    self.souls -= target.cost
+            else:
+                if targeting != "field":
+                    target.placed_on=player.field[fieldpos]
+                    target.effect(target=player.field[fieldpos], origin=target, player=player, item=target)
+                else:
+                    target.effect(target=whole_field,origin=target,player=player,item=target)
 
     def reset(self):
         self.hand=[]
@@ -848,7 +891,7 @@ def deckbuilder(list_to_use:dict[Card,int]) -> list[Card]:
 
 def draw_card(player:Player,draw_from:list[Card],amount:int=1,override:Card=None) -> list[Card]|Card: # type: ignore
     global hand_size_limit
-    if draw_from == [] or (player == player2 and override == None and not markers["do not connect"]):
+    if (draw_from == [] and player == player1) or (player == player2 and override == None and not markers["do not connect"]):
         return
     card_list=[]
     for i in range(amount):
@@ -957,7 +1000,7 @@ def execute(instr:bytes|None) -> bool|str: #executes moves on behalf of player2 
             player2.field[int(instr[1])].abilities[int(instr[2])].use(origin=player2.field[int(instr[1])],target=player1.field[int(instr[3])],player=player2,loc=(player2.field[int(instr[1])].rect.x,player2.field[int(instr[1])].rect.y))
         return False
     elif instr[0] == "d": #drew card
-        draw_card(player2,[],1,override=eval(all_ids[instr[1:]]))
+        draw_card(player2,[],1,override=eval(all_ids[int(instr[1:])]))
     elif instr[0] == "p": #placed mob
         player2.add_to_field(int(instr[1]),int(instr[2])+1)
         return False
@@ -1625,7 +1668,7 @@ abs_subturn=1 #keeps track of how many subturns have passed
 abs_abs_subturn=1 #turns got a bit out of hand
 postsubturn=1 #postsubturn numbers start from 2
 attack_choosing_state=False
-HOST='172.20.102.211'
+HOST='172.20.55.103'
 sock:socket.socket=''
 markers={"retry":False, "deck built":False, "do not connect":True, "start of turn called":False, "not enough souls":[0,0,0,0], "data received, proceed":False, "just chose":False, "finishable":True, "freeze":False, "fade":[0,[0,0,0],0,0,0], "game over called":False,"start of move called":False,"item stealing":(False, None),"forage":False,"monkey":0,"until end just changed":False,"concede":None,"await p2":False,"disconnecting":False,"just selected":False,"uninstalling":False,"name sent":False,"sock closed":False}
 selected=None #card displayed on the side
@@ -1704,7 +1747,7 @@ zombie=r'Mob("Zombie",2,4,[],[bite],{"on hurt":undead},{},"undead","cavern","blu
 
 #region deck stuff
 all_cards=[axolotl,bogged,bread,cake,cow,chicken,creeper,drowned,dummy,elder,egg_rain,frog,goat_horn,guardian,horse,loot_chest,milk,muddy_pig,pufferfish,satoru_gojo,sheep,shield,skeleton,slime,spider,sunken,sword,toji,trident,witch,zombie]
-all_ids={card.id_num:card for card in [eval(card) for card in all_cards]}
+all_ids={eval(card).id_num:card for card in all_cards}
 tiles:list[dict[str,Tile]]=[{all_cut_names[i][j]:Tile(all_cut_names[i][j],all_cut_fulls[i][j],all_cut[i][j],type(eval(eval(all_cut_names[i][j]))).__name__,eval(eval(all_cut_names[i][j])).border,all_cut_rects[i][j]) for j in range(len(all_cut[i]))} for i in range(len(all_cut))]
 d_tiles:dict[str,Tile]={}
 for sub in tiles:
@@ -1801,14 +1844,14 @@ while running:
                         print(f"{'\033[91m'}{str(e)}{'\033[0m'}")
                 else:
                     for datum in sock_read.split("END".encode()):
-                        if datum != '':
+                        if datum != ''.encode():
                             read_buffer.append(datum)
                         print(read_buffer)
         if sock in write_ready and write_buffer != []:
             sock.send(write_buffer.pop().encode())
         if sock in error_ready:
             raise RuntimeError(f"Mom, sockets are acting up again!\n{sock.error}")
-        if tm.time() > next_send_g:
+        if tm.time() > next_send_g and state == "game":
             write_buffer.append("gEND")
             next_send_g=tm.time()+1
     if markers["do not connect"]:
@@ -1905,6 +1948,7 @@ while running:
                     markers["concede"]="you"
                     setup=False
                     state="lose"
+                    write_buffer.append("cEND")
                 elif last_screen == "menu" and subsetting == None:
                     if to_profile_text.textrect.collidepoint(pos):
                         subsetting="profile"
@@ -2105,6 +2149,8 @@ while running:
                 for i in range(3):
                     if selected in player1.hand and player1.field[i] == None and Rect(player1.field_pos[i],cut_dim).collidepoint(pos):
                         if selected.cost <= player1.souls and type(selected) == Mob:
+                            if not markers["do not connect"]:
+                                write_buffer.append("p"+str(player1.hand.index(selected))+str(i)+"END")
                             player1.add_to_field(player1.hand.index(selected),i+1)
                             if setup == True:
                                 abs_subturn += 1
@@ -2112,7 +2158,7 @@ while running:
                                 markers["start of move called"]=False
                             else:
                                 ai_wait_until=tm.time()+ai_delay()
-                                markers["await p2"]=True
+                            markers["await p2"]=True
                         else:
                             if markers["not enough souls"][0] == 0 and min(hand_cost) >= player1.souls:
                                 markers["not enough souls"]=[6,5,0,0] #[amount of cycles,frames per cycle,current colour,frame number]
@@ -2128,6 +2174,7 @@ while running:
                             target=card
                             if type(selected_move) != Ability:
                                 counter=selected_move(origin=selected,target=target,player=player1,noattack=False)
+                                write_buffer.append("m"+str(player1.field.index(selected))+str(selected.moveset.index(selected_move))+str(player2.field.index(target))+"END")
                                 if len(target.moveset) > 0:
                                     other_counter=target.moveset[0](origin=target,target=selected,player=player2,noattack=True)
                                 else:
@@ -2703,14 +2750,14 @@ while running:
 
     '''
     To-do:
-    1. Figure out how to unblock hosting socket
-    2. Does item application count as a subturn?
-    3. Get item stealing to work
-    4. HOLD: Implement setting colour for decks
-    5. Might need to flip player 1 and 2 in execute() (since from the opponent's perspective, they are player 1 and you are player 2, but from your perspective its flipped)
-    6. Lose on deck out, or maybe after a turn timer ends (timer starts on deck out)
-    7. Add uninstall feature or auto-updater feature
+    1. Does item application count as a subturn?
+    2. Get item stealing to work
+    3. HOLD: Implement setting colour for decks
+    4. Might need to flip player 1 and 2 in execute() (since from the opponent's perspective, they are player 1 and you are player 2, but from your perspective its flipped)
+    5. Lose on deck out, or maybe after a turn timer ends (timer starts on deck out)
+    6. Add uninstall feature or auto-updater feature
 
     Bugs:
     1. Player 2 can sometimes choose None mobs to add items to, which causes a crash
+    2. Immediately applied targeted items don't work
     '''
