@@ -1666,8 +1666,7 @@ turn=0
 setup=True
 subturn=1 #subturn numbers start from 1, keeps track of which card should be attacking
 abs_subturn=1 #keeps track of how many subturns have passed
-abs_abs_subturn=1 #turns got a bit out of hand
-postsubturn=1 #postsubturn numbers start from 2
+postsubturn=1 #postsubturn numbers start from 1
 attack_choosing_state=False
 HOST='172.20.55.103'
 sock:socket.socket=''
@@ -1956,6 +1955,7 @@ while running:
 
         elif e.type == MOUSEBUTTONUP and state not in game_overs and not markers["freeze"] and not markers["await p2"]:
             pos:Coord=mouse.get_pos()
+            next_turn=False
             if state == "menu":
                 if singleplayer_text.textrect.collidepoint(pos) and connect_state == "idle":
                     markers["do not connect"]=True
@@ -2220,7 +2220,6 @@ while running:
                                 write_buffer.append("p"+str(player1.hand.index(selected))+str(i)+"END")
                             player1.add_to_field("self",player1.hand.index(selected),i)
                             abs_subturn += 1
-                            abs_abs_subturn += 1
                             markers["start of move called"]=False
                             if not setup and markers["do not connect"]:
                                 ai_wait_until=tm.time()+ai_delay()
@@ -2250,6 +2249,7 @@ while running:
                                 selected.startmove([(target.rect.x,target.rect.y),(selected.rect.x,selected.rect.y)],[10,10])
                                 if (counter == True or counter == other_counter) and len(target.moveset) > 0:
                                     card.moveset[0](origin=target,target=selected,player=player2,noattack=False)
+                                next_turn=True
                             else:
                                 result=selected_move.use(origin=selected,target=target,player=player1,loc=(selected.rect.x,selected.rect.y+cut_dim[1]/2))
                                 if selected_move.targets != "whole field":
@@ -2260,43 +2260,13 @@ while running:
                                 else:
                                     temp="3"
                                 write_buffer.append("a"+str(player1.field.index(selected))+str(selected.abilities.index(selected_move))+temp+"END")
+                                next_turn=True
                             if large_hideable:
                                 hide_large=True
                             if until_end == 0:
-                                if selected != None:
-                                    if "end this turn" in selected.passives:
-                                        selected.passives['end this turn'](origin=selected,player=player1,loc=(selected.rect.x,selected.rect.y))
-                                    if selected.status["psn"] > 0:
-                                        selected.hurt(1,"psn")
-                                        selected.status["psn"] -= 1
-                                if player2.field[subturn-1] != None:
-                                    if "end this turn" in player2.field[subturn-1].passives:
-                                        player2.field[subturn-1].passives["end this turn"](origin=player2.field[subturn-1],player=player2,loc=(player2.field[subturn-1].rect.x,player2.field[subturn-1].rect.y+cut_dim[1]/2))
-                                    if player2.field[subturn-1].status["psn"] > 0:
-                                        player2.field[subturn-1].hurt(1,"psn")
-                                        player2.field[subturn-1].status["psn"] -= 1
-                                if postsubturn == 1 and setup == False:
-                                    abs_subturn += 1
-                                    abs_abs_subturn += 1
-                                    ai_wait_until=tm.time()+ai_delay()
-                                    markers["await p2"]=True
-                                    markers["start of move called"]=False
-                                if abs_abs_subturn != 3:
-                                    selected = player1.field[abs_subturn%len(filled_positions)]
-                                else:
-                                    selected=player1.field[0]
-                                    hide_large=False
-                                    postsubturn += 1
-                                attack_progressing=False
-                                selected_move=None
-                                move_hovering_over=None
-                                targets=[]
                                 if result == "break":
                                     break
-                            else:
-                                until_end -= 1
-                                markers["until end just changed"]=True
-                if type(selected) == Item and markers["item stealing"][0] == False:
+                elif type(selected) == Item and markers["item stealing"][0] == False:
                     for card in targets:
                         if card != None and card.rect.collidepoint(pos) and setup == False and targets != []:
                             if not selected.cost > player1.souls:
@@ -2308,47 +2278,52 @@ while running:
                                     player2.add_to_field("self",selected,player2.field.index(card),ignore_cost=True)
                                     player1.hand.pop(player1.hand.index(selected))
                                     player1.souls -= selected.cost
-                                if targets == [whole_field]:
+                                elif targets == [whole_field]:
                                     write_buffer.append("i"+str(player1.hand.index(selected))+"3"+"END")
                                     player1.add_to_field("field",selected,card)
+                                next_turn=True
                                 if large_hideable:
                                     hide_large=True
-                                if until_end == 0:
-                                    if player1.field[subturn-1] != None:
-                                        if "end this turn" in player1.field[subturn-1].passives:
-                                            player1.field[subturn-1].passives["end this turn"](origin=player1.field[subturn-1],player=player1,loc=(player1.field[subturn-1].rect.x,player1.field[subturn-1].rect.y))
-                                        if player1.field[subturn-1].status["psn"] > 0:
-                                            player1.field[subturn-1].hurt(1,"psn")
-                                            player1.field[subturn-1].status["psn"] -= 1
-                                    if player2.field[subturn-1] != None:
-                                        if "end this turn" in player2.field[subturn-1].passives:
-                                            player2.field[subturn-1].passives["end this turn"](origin=player2.field[subturn-1],player=player2,loc=(player2.field[subturn-1].rect.x,player2.field[subturn-1].rect.y))
-                                        if player2.field[subturn-1].status["psn"] > 0:
-                                            player2.field[subturn-1].hurt(1,"psn")
-                                            player2.field[subturn-1].status["psn"] -= 1
-                                    if postsubturn == 1 and setup == False:
-                                        abs_subturn += 1
-                                        abs_abs_subturn += 1
-                                        ai_wait_until=tm.time()+ai_delay()
-                                        markers["await p2"]=True
-                                        markers["start of move called"]=False
-                                    if abs_abs_subturn != 3:
-                                        selected = player1.field[abs_subturn%len(filled_positions)]
-                                    else:
-                                        selected=player1.field[0]
-                                        hide_large=False
-                                        postsubturn += 1
-                                    attack_progressing=False
-                                    selected_move=None
-                                    move_hovering_over=None
-                                    targets=[]
-                                else:
+                                if until_end > 0:
                                     targets=selected.find_targets()
-                                    until_end -= 1
-                                    markers["until end just changed"]=True
                             else:
                                 if markers["not enough souls"][0] == 0:
                                     markers["not enough souls"]=[6,5,0,0]
+
+                if until_end <= 0 and next_turn:
+                    if type(selected) == Item:
+                        selected=player1.field[subturn-1]
+                    if selected != None:
+                        if "end this turn" in selected.passives:
+                            selected.passives['end this turn'](origin=selected,player=player1,loc=(selected.rect.x,selected.rect.y))
+                        if selected.status["psn"] > 0:
+                            selected.hurt(1,"psn")
+                            selected.status["psn"] -= 1
+                    if player2.field[subturn-1] != None:
+                        if "end this turn" in player2.field[subturn-1].passives:
+                            player2.field[subturn-1].passives["end this turn"](origin=player2.field[subturn-1],player=player2,loc=(player2.field[subturn-1].rect.x,player2.field[subturn-1].rect.y+cut_dim[1]/2))
+                        if player2.field[subturn-1].status["psn"] > 0:
+                            player2.field[subturn-1].hurt(1,"psn")
+                            player2.field[subturn-1].status["psn"] -= 1
+                    if postsubturn == 1 and setup == False:
+                        abs_subturn += 1
+                        ai_wait_until=tm.time()+ai_delay()
+                        markers["await p2"]=True
+                        markers["start of move called"]=False
+                    if abs_subturn != 3:
+                        selected = player1.field[abs_subturn%len(filled_positions)]
+                    else:
+                        selected=player1.field[0]
+                        hide_large=False
+                        postsubturn += 1
+                    attack_progressing=False
+                    selected_move=None
+                    move_hovering_over=None
+                    targets=[]
+                elif until_end > 0:
+                    until_end -= 1
+                    markers["until end just changed"]=True
+
                 if markers["item stealing"][0] == True:
                     for item in targets:
                         if item.rect.collidepoint(pos) and setup == False:
@@ -2393,7 +2368,6 @@ while running:
                 setup=True
                 subturn=1
                 abs_subturn=1
-                abs_abs_subturn=1
                 postsubturn=1
                 attack_choosing_state=False
                 HOST=''
@@ -2618,11 +2592,9 @@ while running:
                 hand_cost.append(99)
         if setup == True and min(hand_cost) >= player1.souls:
             abs_subturn += 1
-            abs_abs_subturn += 1
         if postsubturn >= 5 and setup == False:
             subturn = 1
             abs_subturn = 0
-            abs_abs_subturn = 0
             postsubturn = 1
             turn += 1
             markers["start of turn called"] = False
@@ -2632,11 +2604,10 @@ while running:
             for card in player2.field:
                 if card != None and card.status["aquatised"] > 0:
                     card.status["aquatised"] -= 1
-        if abs_abs_subturn >= 4 and setup == True:
+        if abs_subturn >= 4 and setup == True:
             setup=False
             subturn=1
             abs_subturn=0
-            abs_abs_subturn=0
             player1.souls=1
             player2.souls=1
             draw_card(player1,deck_p1["items"],drawing_cards)
@@ -2838,5 +2809,5 @@ while running:
 
     Bugs:
     1. Player 2 can sometimes choose None mobs to add items to, which causes a crash
-    2. On this turn end passives (like witch's self-aid) are desynced. Move "on this turn end" execution to start of next turn instead of end of this turn?
+    2. CURRENT: On this turn end passives (like witch's self-aid) are desynced. Move "on this turn end" execution to start of next turn instead of end of this turn?
     '''

@@ -152,19 +152,49 @@ If it is in the field, a random move or ability is chosen from its moveset. If a
 
 If the card is an item, if it can be afforded, it is placed onto a random targetable mob. If it is too expensive, the check fails.
 
-# Connectivity
-## Process
-Every game loop, [select.select()] is called on [sock], if available.
-If readable, the contents are written to [sockinfo].
-If writable, [sock_write] is written to it.
-If an exception has occurred, an error is raised.
+# The turn system
+Hoo boy. Thing is, I need to rewrite the turn system to support multiplayer, but when I tried, all sorts of stuff started happening. So, I'm going to write down how it all works, and hopefully that will give me a greater understanding of this convoluted mess.
 
-Regardless, [execute()] is called.
-If a bool is returned, markers["await p2"] is set to it. This tells the game if player2 has made a move.
-Lastly, [sockinfo] and [sock_write] are both set to "g".
+the system is made of 4 variables:
+[turn]\: the amount of turns that have passed since the start of the game.
+[subturn]\: which card whould be attacking.
+[abs_subturn]\: keeps track of how many subturns have passed.
+[postsubturn]\: which card is currently being considered for "end of turn" actions.
+[setup]\: whether the game is in the setup phase (when cards are first being placed).
+[until_end]\: the number of turns until the turn is over. Usually 0.
+```py
+subturn=1
+abs_subturn=1
+postsubturn=1
+setup=True
+until_end=0
 
-Thus, unless [sockinfo] or [sock_write] are changed in the game loop, they will always be "g".
+When a card is placed during the setup phase:
+    abs_subturn += 1
+    if abs_subturn == 4 or no more cards can be placed:
+        setup=False
+        subturn=1
+        abs_subturn=0
 
-As for disconnecting, every frame markers["disconnecting"] is True, [disconnect_cd] goes down by one. If at any point it is False, it is reset.
-If 600 frames have elapsed while it is True, the opponent is taken as having conceded.
-markers["disconnecting"] is set to true if player2 is being awaited and the input foe [execute()] is "g". It cannot be "" since [sock_write] is always set to "g" unless anything happens.
+Then,
+On mob move or item use:
+    if until_end is 0:
+        if not post turn (if postsubturn == 1) and not setup:
+            abs_subturn += 1
+
+        if abs_subturn == 3:
+            postsubturn += 1 (now it is 2)
+
+    else:
+        until-end -= 1
+
+Then,
+if post turn (postsubturn >= 2):
+    activate each card's post turn abilities in sequence
+
+if every card has been covered (postsubturn >= 5):
+    subturn = 1
+    abs_subturn = 0
+    postsubturn = 1
+    turn += 1
+```
