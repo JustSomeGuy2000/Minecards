@@ -953,6 +953,7 @@ def execute(instr:bytes|None) -> bool|str: #executes moves on behalf of player2 
         return False
     if instr[0] == "n": #receiving name
         player2name=instr[1:]
+        return_val=False
     elif instr[0] == "c": #opponent conceded
         state="win"
         setup=False
