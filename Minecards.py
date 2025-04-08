@@ -54,10 +54,11 @@ class Mob(sprite.Sprite):
         self.border=border #blue or pink
         self.miscs=kwargs
         self.original_miscs=kwargs
-        self.id_num=id_num
-        self.proxy_for=None
-        self.proxy=None
-        self.owned_by=None
+        self.id_num:int=id_num
+        self.proxy_for:Mob|None=None
+        self.proxy:Mob|None=None
+        self.owned_by:Player=None
+        self.playable:bool=True
         #SPRITE AND COORDS
         self.front_sprite=transform.scale(image.load(sprite),card_dim).convert()
         self.original_sprite=sprite
@@ -67,6 +68,8 @@ class Mob(sprite.Sprite):
         self.rect=self.current_sprite.get_rect()
         self.rect.x=init_pos[0]
         self.rect.y=init_pos[1]
+        self.shade=Surface(card_dim).convert_alpha()
+        self.shade.fill((0,0,0,128))
         #MOVEMENT
         self.movement_phase=0 #indicates which location is currently being moved to
         self.destinations=[] #the list of locations to move to, in order
@@ -103,6 +106,10 @@ class Mob(sprite.Sprite):
     def update(self):
         global move_hovering_over
         global setup
+        if (self.owned_by.souls < self.cost or None not in self.owned_by.field) and self in self.owned_by.hand:
+            self.playable=False
+        else:
+            self.playable=True
         if cardback != self.back_sprite:
             self.back_sprite=cardback
         if self.timer!=0:
@@ -137,6 +144,8 @@ class Mob(sprite.Sprite):
             screen.blit(self.rot_sprite,(self.rect.x,self.rect.y))
         else:
             screen.blit(self.current_sprite, (self.rect.x,self.rect.y))
+        if not self.playable and self.owned_by == player1:
+            screen.blit(self.shade,(self.rect.x,self.rect.y))
         for item in self.items:
             for subitem in self.items[item]:
                 if subitem.times == []:
@@ -254,6 +263,8 @@ class Item(sprite.Sprite):
         self.rect.y=init_pos[1]
         self.display_rect=Rect(large_image_pos[0],large_image_pos[1],card_dim[0]*3,card_dim[1]*3)
         self.internal_coords=list(init_pos)
+        self.shade=Surface(card_dim).convert_alpha()
+        self.shade.fill((0,0,0,128))
         #MOVEMENT
         self.timer=0
         self.movement_phase=0
@@ -275,6 +286,10 @@ class Item(sprite.Sprite):
 
     def update(self):
         global move_hovering_over
+        if self.owned_by.souls < self.cost or not (False in [entry == None for entry in self.find_targets()]):
+            self.playable=False
+        else:
+            self.playable=True
         if cardback != self.back_sprite:
             self.back_sprite=cardback
         if self.timer!=0:
@@ -298,6 +313,8 @@ class Item(sprite.Sprite):
             self.destinations=[]
             self.times=[]
             self.movement_phase=0
+        if not self.playable and self.owned_by == player1:
+            screen.blit(self.shade,(self.rect.x,self.rect.y))
         self.rect.x, self.rect.y=int(self.internal_coords[0]),int(self.internal_coords[1])
         screen.blit(self.current_sprite, (self.rect.x,self.rect.y))
 
@@ -310,7 +327,7 @@ class Item(sprite.Sprite):
             self.current_sprite=self.cut_sprite
         self.rect=self.current_sprite.get_rect()
 
-    def find_targets(self):
+    def find_targets(self) -> list[Card|None]:
         global whole_field
         tempt=[]
         if self.targets == "can be healed":
@@ -426,37 +443,7 @@ class Player():
                     markers["not enough souls"][2] = 1
                 markers["not enough souls"][0] -= 1
 
-    def add_to_field(self,card:int,pos:int,ignore_cost:bool=False,card_override=None,pos_override=None): #card is index number of hand card to take, pos is field position to take (in human number terms, not list index)
-        global write_buffer
-        if card_override == None:
-            target=self.hand.pop(card)
-        else:
-            target=card_override
-        if type(target) == Mob:
-            self.field[pos-1]=target
-            target.switch_sprite("cut")
-            target.startmove([(self.field_pos[pos-1][0], self.field_pos[pos-1][1]+copysign(cut_dim[1],1.5-self.player_number))],[0])
-            target.startmove([self.field_pos[pos-1]],[15])
-            if not ignore_cost:
-                self.souls -= target.cost
-        elif type(target) == Item:
-            if target.condition != "when played":
-                temp=copy.copy([target.rect.x, target.rect.y])
-                self.field[pos-1].add_item(target)
-                target.switch_sprite("cut")
-                target.internal_coords=temp
-                target.startmove([(self.field[pos-1].rect.x+cut_dim[0]*2/3, self.field[pos-1].rect.y+item_dim[1]*denest(self.field[pos-1].items).index(target))],[30])
-                if not ignore_cost:
-                    self.souls -= target.cost
-            else:
-                if pos_override == None:
-                    true_target=self.field[pos-1]
-                else:
-                    true_target=pos_override
-                target.placed_on=true_target
-                target.effect(target=true_target, origin=target, player=self, item=target)
-
-    def add_to_field_new(self,targeting:Literal["self"]|Literal["opp"]|Literal["field"],card:int|Card,fieldpos:int,ignore_cost:bool=False):
+    def add_to_field(self,targeting:Literal["self","opp","field"],card:int|Card,fieldpos:int,ignore_cost:bool=False):
         if targeting == "self":
             player=self
         elif targeting == "opp":
@@ -465,14 +452,14 @@ class Player():
             else:
                 player=player1
         elif targeting != "field":
-            raise ValueError(f"Invalid argument for targeting: {targeting}")
+            raise ValueError(f"{'\033[91m'}Invalid argument for targeting: {targeting}{'\033[0m'}")
         
         if type(card) == int:
             target=self.hand.pop(card)
-        elif type(card) == Card:
+        elif type(card) == Mob or type(card) == Item:
             target=card
         else:
-            raise TypeError(f"Invalid argument for card: {card}")
+            raise TypeError(f"{'\033[91m'}Invalid argument for card: {card}{'\033[0m'}")
         
         if type(target) == Mob:
             player.field[fieldpos]=target
@@ -496,7 +483,7 @@ class Player():
                     target.placed_on=player.field[fieldpos]
                     target.effect(target=player.field[fieldpos], origin=target, player=player, item=target)
                 else:
-                    target.effect(target=whole_field,origin=target,player=player,item=target)
+                    target.effect(target=whole_field,origin=target,player=player1,item=target)
 
     def reset(self):
         self.hand=[]
@@ -959,6 +946,7 @@ def execute(instr:bytes|None) -> bool|str: #executes moves on behalf of player2 
     global setup
     global player2name
     markers["disconnecting"]=False
+    next_turn=False
     if instr != None and instr.decode() != "":
         instr:str=instr.decode()
     else:
@@ -969,7 +957,7 @@ def execute(instr:bytes|None) -> bool|str: #executes moves on behalf of player2 
         state="win"
         setup=False
         markers["concede"]="opp"
-        return False
+        return_val=False
     elif instr[0] == "m": #attack used
         attacker=player2.field[int(instr[1])]
         attacked=player1.field[int(instr[3])]
@@ -982,15 +970,19 @@ def execute(instr:bytes|None) -> bool|str: #executes moves on behalf of player2 
             other_counter=not counter
         if (counter == True or counter == other_counter) and len(attacked.moveset) > 0:
             attacked.moveset[0](origin=attacked,target=attacker,player=player1,noattack=False)
-        return False
+        if until_end <= 0:
+            next_turn=True
+        return_val=False
     elif instr[0] == "i": #placed item
         if instr[2] == "3":
-            player2.add_to_field(0,0,False,card_override=player2.hand[int(instr[1])],pos_override=whole_field)
+            player2.add_to_field("field",player2.hand[int(instr[1])],None)
         elif instr[3] == "2":
-            player2.add_to_field(int(instr[1]),int(instr[2])+1)
+            player2.add_to_field("self",int(instr[1]),int(instr[2]))
         elif instr[3] == "1":
-            player1.add_to_field(None,int(instr[2])+1,ignore_cost=True,card_override=player2.hand[int(instr[1])],pos_override=player1.field[int(instr[2])])
-        return False
+            player1.add_to_field("self",player2.hand[int(instr[1])],int(instr[2]),True)
+        if until_end <= 0:
+            next_turn=True
+        return_val=False
     elif instr[0] == "a": #ability used
         if instr[3] == "3":
             player2.field[int(instr[1])].abilities[int(instr[2])].use(origin=player2.field[int(instr[1])],target=whole_field,player=player2,loc=(player2.field[int(instr[1])].rect.x,player2.field[int(instr[1])].rect.y))
@@ -998,22 +990,31 @@ def execute(instr:bytes|None) -> bool|str: #executes moves on behalf of player2 
             player2.field[int(instr[1])].abilities[int(instr[2])].use(origin=player2.field[int(instr[1])],target=player2.field[int(instr[3])],player=player2,loc=(player2.field[int(instr[1])].rect.x,player2.field[int(instr[1])].rect.y))
         elif instr[4] == "1":
             player2.field[int(instr[1])].abilities[int(instr[2])].use(origin=player2.field[int(instr[1])],target=player1.field[int(instr[3])],player=player2,loc=(player2.field[int(instr[1])].rect.x,player2.field[int(instr[1])].rect.y))
-        return False
+        if until_end <= 0:
+            next_turn=True
+        return_val=False
     elif instr[0] == "d": #drew card
         draw_card(player2,[],1,override=eval(all_ids[int(instr[1:])]))
+        return_val=markers["await p2"]
     elif instr[0] == "p": #placed mob
-        player2.add_to_field(int(instr[1]),int(instr[2])+1)
-        return False
-    elif instr[0] == "g": #game continuing
+        player2.add_to_field("self",int(instr[1]),int(instr[2]))
+        if until_end <= 0:
+            next_turn=True
+        return_val=False
+    elif instr[0] == "g" or instr[0] == "x": #game continuing or no available moves, just proceed
         if not markers["disconnecting"] and markers["await p2"]:
             markers["disconnecting"] == True
         elif not markers["await p2"]:
             markers["disconnecting"] == False
-        return markers["await p2"]
-    elif instr[0] == "x": #no available moves, just proceed
-        return False
+        if instr[0] == "g":
+            return_val=markers["await p2"]
+        else:
+            return_val=False
     else:
         raise RuntimeError(f"Invalid instructions received: {instr}")
+    if next_turn:
+        pass
+    return return_val
     #print(instr)
 
 def p2_move(hand:list[Card],field:list[Mob|None],souls:int) -> bytes: #returns an encoded string to be passed to execute()
@@ -1797,7 +1798,7 @@ else:
     menu_selected_deck_text=mjgs.render("Selected deck:",True,(255,0,0))
 menu_deck_selected_text=mjgs.render(chosen_deck.name,True,contrast(chosen_deck.colour))
 deck_unusable_warning=mjgs.render("This deck is not usable",True,(200,0,0))
-opp_conc_text=large_font.render("Opponent conceded",True,(30,150,20))
+opp_conc_text=large_font.render("Opponent conceded",True,(240,140,240))
 you_conc_text=large_font.render("You conceded",True,(255,0,0))
 conc_text=ClickableText(mjgs,"Concede",(255,0,0),(window_dim[0]/2-mjgs.size("Concede")[0]/2,window_dim[1]/2))
 settings_text=large_font.render("Settings",True,(0,0,0))
@@ -1852,7 +1853,10 @@ while running:
         if sock in error_ready:
             raise RuntimeError(f"Mom, sockets are acting up again!\n{sock.error}")
         if tm.time() > next_send_g and state == "game":
-            write_buffer.append("gEND")
+            if False not in [card.playable for card in player1.hand]:
+                write_buffer.append("xEND")
+            else:
+                write_buffer.append("gEND")
             next_send_g=tm.time()+1
     if markers["do not connect"]:
         temp=execute(sock_read)
@@ -1880,7 +1884,8 @@ while running:
             player_infofile.write(b.hexlify(json.dumps(playerjson).encode()))
             player_infofile.close()
             running=False
-        elif e.type == MOUSEBUTTONUP and state not in game_overs and not markers["freeze"] and not markers["await p2"]:
+
+        if e.type == MOUSEBUTTONUP and state not in game_overs:
             pos:Coord=mouse.get_pos()
             if settings_button[1].collidepoint(pos) and selected_deck == None and not markers["uninstalling"]:
                 if state == "settings":
@@ -1889,7 +1894,69 @@ while running:
                 else:
                     last_screen = state
                     state = "settings"
-            elif state == "menu":
+
+        if e.type == MOUSEBUTTONUP and state == "settings":
+            if settings_back_text.textrect.collidepoint(pos):
+                if subsetting == None:
+                    state=last_screen
+                if subsetting == "profile":
+                    name_changing=False
+                subsetting=None
+            elif conc_text.textrect.collidepoint(pos) and last_screen == "game" and state not in game_overs:
+                markers["concede"]="you"
+                setup=False
+                state="lose"
+                write_buffer.append("cEND")
+            elif last_screen == "menu" and subsetting == None:
+                if to_profile_text.textrect.collidepoint(pos):
+                    subsetting="profile"
+                elif to_bg_cstm_text.textrect.collidepoint(pos):
+                    subsetting="bg"
+                elif cardbg_change_text.textrect.collidepoint(pos):
+                    subsetting="cardbg"
+                elif change_game_layout_text.textrect.collidepoint(pos):
+                    subsetting="layout"
+                elif uninstall_text.textrect.collidepoint(pos):
+                    subsetting="uninstall"
+            elif subsetting == "profile":
+                if name_change_text.textrect.collidepoint(pos):
+                    name_changing=True
+            elif subsetting == "cardbg":
+                for bg in card_bgs:
+                    if bg.rect.collidepoint(pos):
+                        chosen_card_bg=bg.name
+                        cardback=transform.scale(image.load(bg.path),card_dim).convert_alpha()
+                        deck_plc.current_sprite=transform.rotate(cardback,90)
+            elif subsetting == "layout":
+                for layout in layouts:
+                    if layout.rect.collidepoint(pos):
+                        chosen_layout_name=layout.name
+                        fields_anchor=layout.field_anchor
+                        card_spacing_x=layout.x_spacing
+                        card_spacing_y=layout.y_spacing
+                        large_image_pos=layout.large_image_pos
+                        deck_plc_pos=layout.deck_plc_pos
+                        large_hideable=layout.large_hideable
+                        hand_fill_type=layout.hand_fill_type
+                        y_rails=[fields_anchor[1],fields_anchor[1]+card_spacing_y*2+card_dim_rot[1]+cut_dim[1]]
+                        x_rails=[fields_anchor[0],fields_anchor[0]+cut_dim[0]+card_spacing_x,fields_anchor[0]+cut_dim[0]*2+card_spacing_x*2]
+                        if layout.hand_anchor == layout.field_anchor:
+                            hand_anchors=[(fields_anchor[0],y_rails[1]+cut_dim[1]+card_spacing_y),(fields_anchor[0],fields_anchor[1]/2-card_dim[1]+10)]
+                        else:
+                            hand_anchors=layout.hand_anchor
+                        hearts_rails=[y_rails[0]+cut_dim[0]+10,y_rails[1]-10-20]
+                        subturn_indic_pos=layout.subturn_indic_pos
+                        deck_plc=Item("Deck Placeholder",0,None,transform.rotate(cardback,90),deck_plc_pos,transform.rotate(cardback,90),None,card_dim_rot,'',None,None)
+                        whole_field=Item("THE ENTIRE FIELD!!!",0,nofunction_item,r"Assets\Whole Field.png",(fields_anchor[0],fields_anchor[1]),r"Assets\Whole Field.png","pink",(3*cut_dim[0]+3*card_spacing_x,2*cut_dim[1]+card_dim_rot[1]+2*card_spacing_y),None,None,None)
+            elif subsetting == "uninstall":
+                if uninstall_cancel_text.textrect.collidepoint(pos):
+                    subsetting=None
+                elif uninstall_confirm_text.textrect.collidepoint(pos):
+                    markers["uninstalling"]=True
+
+        elif e.type == MOUSEBUTTONUP and state not in game_overs and not markers["freeze"] and not markers["await p2"]:
+            pos:Coord=mouse.get_pos()
+            if state == "menu":
                 if singleplayer_text.textrect.collidepoint(pos) and connect_state == "idle":
                     markers["do not connect"]=True
                     if chosen_deck.usable:
@@ -1936,7 +2003,7 @@ while running:
                     connect_state="idle"
                 elif decks_text.textrect.collidepoint(pos):
                     state="deck screen"
-
+                    
             elif state == "settings":
                 if settings_back_text.textrect.collidepoint(pos):
                     if subsetting == None:
@@ -1944,7 +2011,7 @@ while running:
                     if subsetting == "profile":
                         name_changing=False
                     subsetting=None
-                elif conc_text.textrect.collidepoint(pos) and last_screen == "game":
+                elif conc_text.textrect.collidepoint(pos) and last_screen == "game" and state not in game_overs:
                     markers["concede"]="you"
                     setup=False
                     state="lose"
@@ -2151,14 +2218,14 @@ while running:
                         if selected.cost <= player1.souls and type(selected) == Mob:
                             if not markers["do not connect"]:
                                 write_buffer.append("p"+str(player1.hand.index(selected))+str(i)+"END")
-                            player1.add_to_field(player1.hand.index(selected),i+1)
-                            if setup == True:
-                                abs_subturn += 1
-                                abs_abs_subturn += 1
-                                markers["start of move called"]=False
-                            else:
+                            player1.add_to_field("self",player1.hand.index(selected),i)
+                            abs_subturn += 1
+                            abs_abs_subturn += 1
+                            markers["start of move called"]=False
+                            if not setup and markers["do not connect"]:
                                 ai_wait_until=tm.time()+ai_delay()
-                            markers["await p2"]=True
+                            if not markers["do not connect"] or (markers["do not connect"] and not setup):
+                                markers["await p2"]=True
                         else:
                             if markers["not enough souls"][0] == 0 and min(hand_cost) >= player1.souls:
                                 markers["not enough souls"]=[6,5,0,0] #[amount of cycles,frames per cycle,current colour,frame number]
@@ -2185,6 +2252,14 @@ while running:
                                     card.moveset[0](origin=target,target=selected,player=player2,noattack=False)
                             else:
                                 result=selected_move.use(origin=selected,target=target,player=player1,loc=(selected.rect.x,selected.rect.y+cut_dim[1]/2))
+                                if selected_move.targets != "whole field":
+                                    if target in player1.field:
+                                        temp=str(player1.field.index(target))+"2"
+                                    else:
+                                        temp=str(player2.field.index(target))+"1"
+                                else:
+                                    temp="3"
+                                write_buffer.append("a"+str(player1.field.index(selected))+str(selected.abilities.index(selected_move))+temp+"END")
                             if large_hideable:
                                 hide_large=True
                             if until_end == 0:
@@ -2196,7 +2271,7 @@ while running:
                                         selected.status["psn"] -= 1
                                 if player2.field[subturn-1] != None:
                                     if "end this turn" in player2.field[subturn-1].passives:
-                                        player2.field[subturn-1].passives["end this turn"](origin=player2.field[subturn-1],player=player2)
+                                        player2.field[subturn-1].passives["end this turn"](origin=player2.field[subturn-1],player=player2,loc=(player2.field[subturn-1].rect.x,player2.field[subturn-1].rect.y+cut_dim[1]/2))
                                     if player2.field[subturn-1].status["psn"] > 0:
                                         player2.field[subturn-1].hurt(1,"psn")
                                         player2.field[subturn-1].status["psn"] -= 1
@@ -2226,13 +2301,16 @@ while running:
                         if card != None and card.rect.collidepoint(pos) and setup == False and targets != []:
                             if not selected.cost > player1.souls:
                                 if card in player1.field:
-                                    player1.add_to_field(player1.hand.index(selected),player1.field.index(card)+1)
+                                    write_buffer.append("i"+str(player1.hand.index(selected))+str(player1.field.index(card))+"2"+"END")
+                                    player1.add_to_field("self",player1.hand.index(selected),player1.field.index(card))
                                 elif card in player2.field:
-                                    player2.add_to_field(None,player2.field.index(card)+1,ignore_cost=True,card_override=selected,pos_override=card)
+                                    write_buffer.append("i"+str(player2.hand.index(selected))+str(player1.field.index(card))+"1"+"END")
+                                    player2.add_to_field("self",selected,player2.field.index(card),ignore_cost=True)
                                     player1.hand.pop(player1.hand.index(selected))
                                     player1.souls -= selected.cost
                                 if targets == [whole_field]:
-                                    player1.add_to_field(0,0,False,card_override=selected,pos_override=card)
+                                    write_buffer.append("i"+str(player1.hand.index(selected))+"3"+"END")
+                                    player1.add_to_field("field",selected,card)
                                 if large_hideable:
                                     hide_large=True
                                 if until_end == 0:
@@ -2496,7 +2574,7 @@ while running:
             draw_card(player2,deck_p2["mobs"],8)
             if markers["do not connect"]:
                 for i in range(3):
-                    player2.add_to_field(i,i+1,True)
+                    player2.add_to_field("self",i,i,True)
             draw_card(player1,deck_p1["mobs"],8)
             markers["deck built"]=True
         if not markers["start of turn called"] and turn != 1:
@@ -2610,20 +2688,21 @@ while running:
                 draw.rect(screen,ORANGE,temp,5)
                 draw.rect(screen,(255,255,255),Rect(temp.centerx-20,temp.centery-5,40,10))
                 draw.rect(screen,(255,255,255),Rect(temp.centerx-5,temp.centery-20,10,40))
+
         if markers["finishable"] and setup == False and not markers["game over called"]:
-            if player1.field == [None, None, None] or markers["concede"] == "you":
+            if (player1.field == [None, None, None] and markers["concede"] == None) or markers["concede"] == "you":
                 state = "lose"
                 markers["freeze"]=True
                 markers["fade"]=[60,[0,0,0],255,0,0] #duration in frames, final colour, final transparency, current transparency, transparency change per frame
                 markers["game over called"]=True
                 markers["fade"][4]=markers["fade"][2]/markers["fade"][0]
-            if player2.field == [None, None, None] or markers["concede"] == "opp":
+            if (player2.field == [None, None, None] and markers["concede"] == None) or markers["concede"] == "opp":
                 state = "win"
                 markers["freeze"]=True
                 markers["fade"]=[60,[10,140,50],255,0,0]
                 markers["fade"][4]=markers["fade"][2]/markers["fade"][0]
                 markers["game over called"]=True
-            if player1.field == [None, None, None] and player2.field == [None, None, None]:
+            if player1.field == [None, None, None] and player2.field == [None, None, None] and markers["concede"] == None:
                 state ="tie"
                 markers["freeze"]=True
                 markers["fade"]=[60,[10,220,70],255,0,0]
@@ -2759,5 +2838,5 @@ while running:
 
     Bugs:
     1. Player 2 can sometimes choose None mobs to add items to, which causes a crash
-    2. Immediately applied targeted items don't work
+    2. On this turn end passives (like witch's self-aid) are desynced. Move "on this turn end" execution to start of next turn instead of end of this turn?
     '''
