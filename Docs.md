@@ -116,6 +116,7 @@ The instruction string is usually made of up to 5 characters: [0][1][2][3][4].
     "g" indicates the opponent is still connected
     "d" indicates a card has been drawn.
     "x" indicates the player has no moves and to proceed
+    "t" indicates a timeout
 If [0]="n", the following information is the name.
 If [0]="c", there is no following information.
 If [0]="m", the player used a mob move.

@@ -21,7 +21,6 @@ type Coord = tuple[int|float,int|float]
 type Size = tuple[int,int]
 type Path = str
 type Attack_params = dict[Literal["origin"]:Card,Literal["target"]:Card,Literal["damage"]:int,Literal["noattack"]:bool]
-#Name:LAPTOP-20C14P7N, Address:172.20.57.66
 
 window_dim=(1500,850)
 screen=display.set_mode(window_dim)
@@ -83,6 +82,22 @@ class Mob(sprite.Sprite):
         self.rot=[0,0,0] #frames to rotate, final rotation angle, current frame
         self.rot_sprite=None
         self.move_anim:tuple[int,Surface,Coord]=(0,None,None)
+
+    def __repr__(self):
+        temp="None"
+        if self.owned_by == player1:
+            temp="Player 1"
+            if self in player1.hand:
+                temp2="hand"
+            else:
+                temp2="field"
+        elif self.owned_by == player2:
+            temp="Player 2"
+            if self in player2.hand:
+                temp2="hand"
+            else:
+                temp2="field"
+        return f"<Mob {self.name} in {temp}'s {temp2}>"
 
     def startmove(self,dests:list[Coord],times:list[int]):
         if self.timer != 0 or (len(self.destinations) > 0 and self.times[-1] == 0):
@@ -272,6 +287,22 @@ class Item(sprite.Sprite):
         self.times=[]
         self.velocity=(0,0)
 
+    def __repr__(self):
+        temp="None"
+        if self.owned_by == player1:
+            temp="Player 1"
+            if self in player1.hand:
+                temp2="hand"
+            else:
+                temp2="field"
+        elif self.owned_by == player2:
+            temp="Player 2"
+            if self in player2.hand:
+                temp2="hand"
+            else:
+                temp2="field"
+        return f"<Item {self.name} in {temp}'s {temp2}>"
+
     def startmove(self,dests:list[Coord],times:list[int]): #destination as a coord tuple, time in frames
         if self.timer != 0 or (len(self.destinations) > 0 and self.times[-1] == 0):
             self.destinations+=dests
@@ -380,6 +411,9 @@ class Player():
         elif player_number == 2:
             self.souls_pos=(field_pos[2][0]+cut_dim[0]+10,50)
             self.deck=deck_p2
+
+    def __repr__(self):
+        return f"<Player {str(self.player_number)}>"
 
     def update(self):
         global abs_subturn
@@ -509,6 +543,9 @@ class Ability():
         else:
             self.name=name
 
+    def __repr__(self):
+        return f"<Ability {self.name}>"
+
     def find_targets(self, selected):
         global whole_field
         tempt=[]
@@ -567,6 +604,9 @@ class Tile(): #a simplified container for card data
         self.position=position
         self.rect=cut_sprite.get_rect(x=position[0],y=position[1])
 
+    def __repr__(self):
+        return f"<Tile for {self.name}>"
+
     def display(self):
         screen.blit(self.cut_sprite,(self.rect.x,self.rect.y))
 
@@ -608,7 +648,10 @@ class DeckPreset(): #this gets confusing fast so I'll be leaving some comments
         self.minus1_text=None
         self.pink_mob=False
         self.pink_item=False
-        usable=False
+        self.usable=False
+
+    def __repr__(self):
+        return f"<Deck Preset {self.name}>"
             
     def to_dict(self):
         return [self.name,{"number":self.number,"colour":self.colour,"mobs":self.original_mobs,"items":self.original_items}]
@@ -807,6 +850,9 @@ class BGTile(): #a container for background changing information
         self.rect=self.img.get_rect(x=pos[0],y=pos[1])
         self.textpos=(pos[0]+(self.rect.width/2-self.text.get_width()/2),pos[1]+self.rect.height+20)
 
+    def __repr__(self):
+        return f"Background Tile for {self.name}"
+
     def display(self):
         if chosen_card_bg == self.name:
             draw.rect(screen,ORANGE,Rect(self.pos[0]-10,self.pos[1]-10,self.rect.width+20,self.rect.height+20))
@@ -835,6 +881,9 @@ class LayoutTile(): # a container for game layout information
         self.display_surf.blit(self.text,(0,self.img.get_rect().height/2-self.text.get_height()/2))
         self.display_surf.blit(self.img,(self.text.get_rect().width+30,0))
         self.rect=self.display_surf.get_rect(left=self.display_pos[0],top=self.display_pos[1])
+
+    def __repr__(self):
+        return f"Layout Container for {self.name}"
 
     def display(self):
         screen.blit(self.display_surf,self.rect)
@@ -1011,6 +1060,16 @@ def execute(instr:bytes|None) -> bool|str: #executes moves on behalf of player2 
             return_val=markers["await p2"]
         else:
             return_val=False
+        if setup and markers["await p2"]:
+            return_val=markers["await p2"]
+            markers["disconnecting"]=True
+    elif instr[0] == "t":
+        state == "lose"
+        setup=False
+        markers["concede"]="you"
+        markers["you timeout"]=True
+        print(f"{'\033[93m'}Conceding by timeout{'\033[0m'}")
+        return_val=True
     else:
         raise RuntimeError(f"Invalid instructions received: {instr}")
     if next_turn:
@@ -1669,9 +1728,9 @@ subturn=1 #subturn numbers start from 1, keeps track of which card should be att
 abs_subturn=1 #keeps track of how many subturns have passed
 postsubturn=1 #postsubturn numbers start from 1
 attack_choosing_state=False
-HOST='172.20.55.103'
+HOST='172.20.16.200'
 sock:socket.socket=''
-markers={"retry":False, "deck built":False, "do not connect":True, "start of turn called":False, "not enough souls":[0,0,0,0], "data received, proceed":False, "just chose":False, "finishable":True, "freeze":False, "fade":[0,[0,0,0],0,0,0], "game over called":False,"start of move called":False,"item stealing":(False, None),"forage":False,"monkey":0,"until end just changed":False,"concede":None,"await p2":False,"disconnecting":False,"just selected":False,"uninstalling":False,"name sent":False,"sock closed":False}
+markers={"retry":False, "deck built":False, "do not connect":True, "start of turn called":False, "not enough souls":[0,0,0,0], "data received, proceed":False, "just chose":False, "finishable":True, "freeze":False, "fade":[0,[0,0,0],0,0,0], "game over called":False,"start of move called":False,"item stealing":(False, None),"forage":False,"monkey":0,"until end just changed":False,"concede":None,"await p2":False,"disconnecting":False,"just selected":False,"uninstalling":False,"name sent":False,"sock closed":False,"you timeout":False}
 selected=None #card displayed on the side
 selected_move=None #move that has been selected
 attack_progressing=False #is it the attack target choosing stage
@@ -1819,6 +1878,8 @@ uninstall_confirm_text=ClickableText(mjgs,"Yes",(255,0,0),(2*window_dim[0]/3-mjg
 uninstalling_text=large_font.render("Uninstalling...",True,(0,0,0))
 singleplayer_text=ClickableText(mjgs,"Singleplayer",(0,0,0),(window_dim[0]*11/18-mjgs.size("Singleplayer")[0]/2,550))
 multiplayer_text=ClickableText(mjgs,"Multiplayer",(0,0,0),(window_dim[0]*7/18-mjgs.size("Multiplayer")[0]/2,550))
+you_timeout_text=large_font.render("You timed out",True,(255,0,0))
+opp_timeout_text=large_font.render("Opponent timed out",True,(240,140,240))
 #endregion
 
 while running:
@@ -1840,16 +1901,16 @@ while running:
                     if e.errno == 10053 or e.errno == 10054:
                         disconnect_cd=0
                         markers["disconnecting"]=True
-                        print(f"{'\033[93m'}Err. 10053/4: Concede indicated{'\033[0m'}")
+                        print(f"{'\033[93m'}Err. 10053/4: Concede indicated by disconnect{'\033[0m'}")
                     else:
                         print(f"{'\033[91m'}{str(e)}{'\033[0m'}")
                 else:
                     for datum in sock_read.split("END".encode()):
                         if datum != ''.encode():
                             read_buffer.append(datum)
-                        print(read_buffer)
+                        #print(read_buffer)
         if sock in write_ready and write_buffer != []:
-            sock.send(write_buffer.pop().encode())
+            sock.send(write_buffer.pop(0).encode())
         if sock in error_ready:
             raise RuntimeError(f"Mom, sockets are acting up again!\n{sock.error}")
         if tm.time() > next_send_g and state == "game":
@@ -1862,7 +1923,7 @@ while running:
         temp=execute(sock_read)
         sock_read="gEND".encode()
     elif read_buffer != []:
-        temp=execute(read_buffer.pop())
+        temp=execute(read_buffer.pop(0))
     if type(temp) == bool:
         markers["await p2"]=temp
 
@@ -2224,8 +2285,7 @@ while running:
                             markers["start of move called"]=False
                             if not setup and markers["do not connect"]:
                                 ai_wait_until=tm.time()+ai_delay()
-                            if not markers["do not connect"] or (markers["do not connect"] and not setup):
-                                markers["await p2"]=True
+                            markers["await p2"]=True
                         else:
                             if markers["not enough souls"][0] == 0 and min(hand_cost) >= player1.souls:
                                 markers["not enough souls"]=[6,5,0,0] #[amount of cycles,frames per cycle,current colour,frame number]
@@ -2359,8 +2419,6 @@ while running:
         elif e.type == MOUSEBUTTONUP and state in game_overs:
             pos = mouse.get_pos()
             if to_menu_text.textrect.collidepoint(pos):
-                if type(sock) == socket.socket:
-                    sock.close()
                 sock=''
                 state = "menu"
                 connect_state="idle"
@@ -2373,7 +2431,7 @@ while running:
                 attack_choosing_state=False
                 HOST=''
                 sock=''
-                markers={"retry":False, "deck built":False, "do not connect":True, "start of turn called":False, "not enough souls":[0,0,0,0], "data received, proceed":False, "just chose":False, "finishable":True, "freeze":False, "game over called":False, "fade":[0,[0,0,0],0,0,0], "start of move called":False,"item stealing":(False, None),"forage":False,"monkey":0,"until end just changed":False,"concede":None,"await p2":False,"disconnecting":False,"hide large":False,"just selected":False,"uninstalling":False,"name sent":False,"sock closed":False}
+                markers={"retry":False, "deck built":False, "do not connect":True, "start of turn called":False, "not enough souls":[0,0,0,0], "data received, proceed":False, "just chose":False, "finishable":True, "freeze":False, "game over called":False, "fade":[0,[0,0,0],0,0,0], "start of move called":False,"item stealing":(False, None),"forage":False,"monkey":0,"until end just changed":False,"concede":None,"await p2":False,"disconnecting":False,"hide large":False,"just selected":False,"uninstalling":False,"name sent":False,"sock closed":False,"you timeout":False}
                 selected=None
                 hide_large=False
                 selected_move=None
@@ -2697,7 +2755,9 @@ while running:
     if setup == False:
         if state == "lose":
             if markers["fade"][0] <= 0:
-                if markers["concede"] == "you":
+                if markers["you timeout"]:
+                    screen.blit(you_timeout_text,(window_dim[0]/2-you_timeout_text.get_width()/2,window_dim[1]/2-100))
+                elif markers["concede"] == "you":
                     screen.blit(you_conc_text,(window_dim[0]/2-large_font.size("You conceded")[0]/2,window_dim[1]/2-100))
                 else:
                     screen.blit(lose_text,(window_dim[0]/2-large_font.size("You lost...")[0]/2,window_dim[1]/2-100))
@@ -2709,7 +2769,9 @@ while running:
 
         if state == "win":
             if markers["fade"][0] <= 0:
-                if markers["concede"] == "opp":
+                if disconnect_cd <= 0:
+                    screen.blit(opp_timeout_text,(window_dim[0]/2-opp_timeout_text.get_width()/2,window_dim[1]/2-100))
+                elif markers["concede"] == "opp":
                     screen.blit(opp_conc_text,(window_dim[0]/2-large_font.size("Opponent conceded")[0]/2,window_dim[1]/2-100))
                 else:
                     screen.blit(win_text,(window_dim[0]/2-large_font.size("You won!")[0]/2,window_dim[1]/2-100))
@@ -2786,6 +2848,12 @@ while running:
         state="win"
         setup=False
         markers["concede"]="opp"
+        if type(sock) == socket.socket:
+            try:
+                sock.send("tEND".encode())
+                print(f"{'\033[93m'}Concede indicated by timeout{'\033[0m'}")
+            except:
+                pass
     if tm.time() >= ai_wait_until and markers["await p2"] and markers["do not connect"]:
         temp=execute(p2_move(player2.hand,player2.field,player2.souls))
         if type(temp) == bool:
@@ -2793,7 +2861,8 @@ while running:
     if markers["await p2"]:
         thinking_progress+=4
         thinking_rot=transform.rotate(thinking,thinking_progress)
-        screen.blit(thinking_rot,thinking_rot.get_rect(center=(870,75)))
+        if state != "settings":
+            screen.blit(thinking_rot,thinking_rot.get_rect(center=(870,75)))
     else:
         thinking_progress=0
     display.update()
