@@ -478,14 +478,14 @@ class Player():
                 markers["not enough souls"][0] -= 1
 
     def add_to_field(self,targeting:Literal["self","opp","field"],card:int|Card,fieldpos:int,ignore_cost:bool=False):
-        if targeting == "self":
+        if targeting == "self" or targeting == "field":
             player=self
         elif targeting == "opp":
             if self == player1:
                 player=player2
             else:
                 player=player1
-        elif targeting != "field":
+        else:
             raise ValueError(f"{'\033[91m'}Invalid argument for targeting: {targeting}{'\033[0m'}")
         
         if type(card) == int:
@@ -648,7 +648,6 @@ class DeckPreset(): #this gets confusing fast so I'll be leaving some comments
         self.minus1_text=None
         self.pink_mob=False
         self.pink_item=False
-        self.usable=False
 
     def __repr__(self):
         return f"<Deck Preset {self.name}>"
@@ -989,17 +988,17 @@ def unpack():
             if deck_name[0] != "<":
                 deck_presets.append(DeckPreset(deck_name,infojson[deck_name]["number"],infojson[deck_name]["colour"],infojson[deck_name]["mobs"],infojson[deck_name]["items"]))
 
-def execute(instr:bytes|None) -> bool|str: #executes moves on behalf of player2 according to a instruction string
+def execute(instr:bytes|None) -> tuple[bool,bool]: #executes moves on behalf of player2 according to a instruction string
     global markers
     global state
     global setup
     global player2name
     markers["disconnecting"]=False
-    next_turn=False
+    progress_turn=False
     if instr != None and instr.decode() != "":
         instr:str=instr.decode()
     else:
-        return False
+        return False, False
     if instr[0] == "n": #receiving name
         player2name=instr[1:]
         return_val=False
@@ -1020,8 +1019,7 @@ def execute(instr:bytes|None) -> bool|str: #executes moves on behalf of player2 
             other_counter=not counter
         if (counter == True or counter == other_counter) and len(attacked.moveset) > 0:
             attacked.moveset[0](origin=attacked,target=attacker,player=player1,noattack=False)
-        if until_end <= 0:
-            next_turn=True
+        progress_turn=True
         return_val=False
     elif instr[0] == "i": #placed item
         if instr[2] == "3":
@@ -1030,8 +1028,7 @@ def execute(instr:bytes|None) -> bool|str: #executes moves on behalf of player2 
             player2.add_to_field("self",int(instr[1]),int(instr[2]))
         elif instr[3] == "1":
             player1.add_to_field("self",player2.hand[int(instr[1])],int(instr[2]),True)
-        if until_end <= 0:
-            next_turn=True
+        progress_turn=True
         return_val=False
     elif instr[0] == "a": #ability used
         if instr[3] == "3":
@@ -1040,16 +1037,14 @@ def execute(instr:bytes|None) -> bool|str: #executes moves on behalf of player2 
             player2.field[int(instr[1])].abilities[int(instr[2])].use(origin=player2.field[int(instr[1])],target=player2.field[int(instr[3])],player=player2,loc=(player2.field[int(instr[1])].rect.x,player2.field[int(instr[1])].rect.y))
         elif instr[4] == "1":
             player2.field[int(instr[1])].abilities[int(instr[2])].use(origin=player2.field[int(instr[1])],target=player1.field[int(instr[3])],player=player2,loc=(player2.field[int(instr[1])].rect.x,player2.field[int(instr[1])].rect.y))
-        if until_end <= 0:
-            next_turn=True
+        progress_turn=True
         return_val=False
     elif instr[0] == "d": #drew card
         draw_card(player2,[],1,override=eval(all_ids[int(instr[1:])]))
         return_val=markers["await p2"]
     elif instr[0] == "p": #placed mob
         player2.add_to_field("self",int(instr[1]),int(instr[2]))
-        if until_end <= 0:
-            next_turn=True
+        progress_turn=True
         return_val=False
     elif instr[0] == "g" or instr[0] == "x": #game continuing or no available moves, just proceed
         if not markers["disconnecting"] and markers["await p2"]:
@@ -1072,9 +1067,9 @@ def execute(instr:bytes|None) -> bool|str: #executes moves on behalf of player2 
         return_val=True
     else:
         raise RuntimeError(f"Invalid instructions received: {instr}")
-    if next_turn:
-        pass
-    return return_val
+    if setup:
+        progress_turn=False
+    return return_val, progress_turn
     #print(instr)
 
 def p2_move(hand:list[Card],field:list[Mob|None],souls:int) -> bytes: #returns an encoded string to be passed to execute()
@@ -1138,6 +1133,20 @@ def p2_move(hand:list[Card],field:list[Mob|None],souls:int) -> bytes: #returns a
             result="x"
             break
     return result.encode()
+
+def retry_del(func,path,exc):
+    print(f"Failed to delete {path}. Retrying...")
+    os.chmod(path, stat.S_IWRITE)
+    func(path)
+    print(f"Successfully removed: {path}")
+
+def uninstall(arg):
+    for file in os.listdir(arg):
+        if file != os.path.basename(__file__):
+            print(f"Removing: {os.path.join(arg,file)}")
+            rmtree(os.path.join(arg,file),onexc=retry_del)
+    rmtree(__path__,onexc=retry_del)
+    rmtree(arg,onexc=retry_del)
 
 def atk_check(func) -> bool: #decorator that applies to all attacks
     def atk_wrapper(**kwargs):
@@ -1426,7 +1435,11 @@ def puffer_poison(**kwargs): #item
     if "only_targeting" not in kwargs:
         kwargs["target"].status["psn"] += 1
     else:
-        return [card for card in player2.field if card != None]
+        if kwargs["player"] == player1:
+            opp=player2
+        else:
+            opp=player1
+        return [card for card in opp.field if card != None]
 
 @atk_check
 def purple(**kwargs:Attack_params) -> tuple[Literal[False],int,list[Card]]: #attack
@@ -1763,6 +1776,7 @@ read_buffer:list[bytes]=[]
 write_buffer:list[str]=[]
 player2name:str=None
 next_send_g:int=0
+p2_progress_turn:bool=False
 #endregion
 
 #region card definitions
@@ -1884,6 +1898,8 @@ opp_timeout_text=large_font.render("Opponent timed out",True,(240,140,240))
 
 while running:
     screen.blit(background,(0,0))
+    if markers["uninstalling"]:
+        uninstall(os.getcwd())
     if markers["monkey"] != 0:
         screen.blit(monkey_sprite,(window_dim[0]-(markers["monkey"]/60)*window_dim[0],0))
         markers["monkey"] -= 1
@@ -1920,12 +1936,28 @@ while running:
                 write_buffer.append("gEND")
             next_send_g=tm.time()+1
     if markers["do not connect"]:
-        temp=execute(sock_read)
+        temp, p2_progress_turn=execute(sock_read)
         sock_read="gEND".encode()
+        if setup:
+            temp=False
     elif read_buffer != []:
-        temp=execute(read_buffer.pop(0))
+        temp, p2_progress_turn=execute(read_buffer.pop(0))
     if type(temp) == bool:
         markers["await p2"]=temp
+    if p2_progress_turn:
+        if until_end <= 0 and next_turn:
+            corr_subturn=list(filled_positions.keys())[abs_subturn%len(filled_positions)]
+            if player2.field[corr_subturn-1] != None:
+                if "end this turn" in player2.field[corr_subturn-1].passives:
+                    player2.field[corr_subturn-1].passives["end this turn"](origin=player2.field[corr_subturn-1],player=player2,loc=(player2.field[corr_subturn-1].rect.x,player2.field[corr_subturn-1].rect.y+cut_dim[1]/2))
+                if player2.field[corr_subturn-1].status["psn"] > 0:
+                    player2.field[corr_subturn-1].hurt(1,"psn")
+                    player2.field[corr_subturn-1].status["psn"] -= 1
+        elif until_end > 0:
+            until_end -= 1
+            markers["until end just changed"]=True
+            markers["await p2"]=True
+        p2_progress_turn=False
 
     for e in event.get():
         if e.type == QUIT and not markers["uninstalling"]:
@@ -2013,7 +2045,8 @@ while running:
                 if uninstall_cancel_text.textrect.collidepoint(pos):
                     subsetting=None
                 elif uninstall_confirm_text.textrect.collidepoint(pos):
-                    markers["uninstalling"]=True
+                    if os.getcwd().endswith("Minecards"):
+                        markers["uninstalling"]=True
 
         elif e.type == MOUSEBUTTONUP and state not in game_overs and not markers["freeze"] and not markers["await p2"]:
             pos:Coord=mouse.get_pos()
@@ -2285,7 +2318,9 @@ while running:
                             markers["start of move called"]=False
                             if not setup and markers["do not connect"]:
                                 ai_wait_until=tm.time()+ai_delay()
-                            markers["await p2"]=True
+                                markers["await p2"]=True
+                            elif not markers["do not connect"]:
+                                markers["await p2"]=True
                         else:
                             if markers["not enough souls"][0] == 0 and min(hand_cost) >= player1.souls:
                                 markers["not enough souls"]=[6,5,0,0] #[amount of cycles,frames per cycle,current colour,frame number]
@@ -2360,12 +2395,6 @@ while running:
                         if selected.status["psn"] > 0:
                             selected.hurt(1,"psn")
                             selected.status["psn"] -= 1
-                    if player2.field[subturn-1] != None:
-                        if "end this turn" in player2.field[subturn-1].passives:
-                            player2.field[subturn-1].passives["end this turn"](origin=player2.field[subturn-1],player=player2,loc=(player2.field[subturn-1].rect.x,player2.field[subturn-1].rect.y+cut_dim[1]/2))
-                        if player2.field[subturn-1].status["psn"] > 0:
-                            player2.field[subturn-1].hurt(1,"psn")
-                            player2.field[subturn-1].status["psn"] -= 1
                     if postsubturn == 1 and setup == False:
                         abs_subturn += 1
                         ai_wait_until=tm.time()+ai_delay()
@@ -2855,7 +2884,7 @@ while running:
             except:
                 pass
     if tm.time() >= ai_wait_until and markers["await p2"] and markers["do not connect"]:
-        temp=execute(p2_move(player2.hand,player2.field,player2.souls))
+        temp, p2_progress_turn=execute(p2_move(player2.hand,player2.field,player2.souls))
         if type(temp) == bool:
             markers["await p2"]=temp
     if markers["await p2"]:
@@ -2873,11 +2902,8 @@ while running:
     1. Does item application count as a subturn?
     2. Get item stealing to work
     3. HOLD: Implement setting colour for decks
-    4. Might need to flip player 1 and 2 in execute() (since from the opponent's perspective, they are player 1 and you are player 2, but from your perspective its flipped)
-    5. Lose on deck out, or maybe after a turn timer ends (timer starts on deck out)
-    6. Add uninstall feature or auto-updater feature
+    4. Add auto-updater feature
+    5. Postsubturns for player 2
 
     Bugs:
-    1. Player 2 can sometimes choose None mobs to add items to, which causes a crash
-    2. CURRENT: On this turn end passives (like witch's self-aid) are desynced. Move "on this turn end" execution to start of next turn instead of end of this turn?
     '''
