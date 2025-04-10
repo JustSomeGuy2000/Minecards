@@ -454,8 +454,6 @@ class Player():
                         if card.proxy_for != None:
                             card.proxy_for.proxy=None
                         self.field[self.field.index(card)]=None
-                        if self.player_number == 1:
-                            abs_subturn -= 1
                 if "always" in card.passives:
                     card.passives["always"](origin=card,player=self,loc=(card.rect.x,card.rect.y))
         screen.blit(soul,self.souls_pos)
@@ -517,7 +515,7 @@ class Player():
                     target.placed_on=player.field[fieldpos]
                     target.effect(target=player.field[fieldpos], origin=target, player=player, item=target)
                 else:
-                    target.effect(target=whole_field,origin=target,player=player1,item=target)
+                    target.effect(target=whole_field,origin=target,player=player,item=target)
 
     def reset(self):
         self.hand=[]
@@ -1027,7 +1025,7 @@ def execute(instr:bytes|None) -> tuple[bool,bool]: #executes moves on behalf of 
         elif instr[3] == "2":
             player2.add_to_field("self",int(instr[1]),int(instr[2]))
         elif instr[3] == "1":
-            player1.add_to_field("self",player2.hand[int(instr[1])],int(instr[2]),True)
+            player2.add_to_field("self",player2.hand[int(instr[1])],int(instr[2]),True)
         progress_turn=True
         return_val=False
     elif instr[0] == "a": #ability used
@@ -1147,6 +1145,17 @@ def uninstall(arg):
             rmtree(os.path.join(arg,file),onexc=retry_del)
     rmtree(__path__,onexc=retry_del)
     rmtree(arg,onexc=retry_del)
+
+def check_actionable(origin:Mob,target:Mob,player:Player,condition:str,dmg:int=None) -> bool:
+    if condition in origin.items:
+        temp=tuple(origin.items[condition])
+        for item in temp:
+            result=item.effect(origin=origin,target=target,player=player,item=item)
+    if condition in origin.passives:
+        result=origin.passives[condition](origin=origin,target=target,player=player,loc=(origin.rect.x+cut_dim[0]/2,origin.rect.y))
+    if condition in origin.abilities:
+        result=origin.abilities[condition](origin=origin,target=target,player=player,loc=(origin.rect.x+cut_dim[0]/2,origin.rect.y))
+    return result
 
 def atk_check(func) -> bool: #decorator that applies to all attacks
     def atk_wrapper(**kwargs):
@@ -1305,6 +1314,8 @@ def elders_curse(**kwargs) -> Literal[True]: #passive: end of turn
     global move_hovering_over
     global targets
     global hide_large
+    global markers
+    global ai_wait_until
     if kwargs["player"] == player1 and kwargs["origin"] in player1.field:
         selected=kwargs["origin"]
         hide_large=False
@@ -1312,6 +1323,11 @@ def elders_curse(**kwargs) -> Literal[True]: #passive: end of turn
         attack_progressing=True
         move_hovering_over=(kwargs["origin"].move_positions[0],kwargs["origin"].moveset[0])
         targets=player2.field
+        if markers["do not connect"]:
+            ai_wait_until=tm.time()+ai_delay()
+        return True
+    elif kwargs["origin"] in player2.field:
+        markers["await p2"]=True
         return True
 
 @atk_check
@@ -1741,7 +1757,7 @@ subturn=1 #subturn numbers start from 1, keeps track of which card should be att
 abs_subturn=1 #keeps track of how many subturns have passed
 postsubturn=1 #postsubturn numbers start from 1
 attack_choosing_state=False
-HOST='172.20.16.200'
+HOST='172.20.117.92'
 sock:socket.socket=''
 markers={"retry":False, "deck built":False, "do not connect":True, "start of turn called":False, "not enough souls":[0,0,0,0], "data received, proceed":False, "just chose":False, "finishable":True, "freeze":False, "fade":[0,[0,0,0],0,0,0], "game over called":False,"start of move called":False,"item stealing":(False, None),"forage":False,"monkey":0,"until end just changed":False,"concede":None,"await p2":False,"disconnecting":False,"just selected":False,"uninstalling":False,"name sent":False,"sock closed":False,"you timeout":False}
 selected=None #card displayed on the side
@@ -1891,7 +1907,7 @@ uninstall_cancel_text=ClickableText(mjgs,"No",(0,255,0),(window_dim[0]/3-mjgs.si
 uninstall_confirm_text=ClickableText(mjgs,"Yes",(255,0,0),(2*window_dim[0]/3-mjgs.size("Yes")[0]/2,550))
 uninstalling_text=large_font.render("Uninstalling...",True,(0,0,0))
 singleplayer_text=ClickableText(mjgs,"Singleplayer",(0,0,0),(window_dim[0]*11/18-mjgs.size("Singleplayer")[0]/2,550))
-multiplayer_text=ClickableText(mjgs,"Multiplayer",(0,0,0),(window_dim[0]*7/18-mjgs.size("Multiplayer")[0]/2,550))
+multiplayer_text=ClickableText(mjgs,"Host Game",(0,0,0),(window_dim[0]*7/18-mjgs.size("Host Game")[0]/2,550))
 you_timeout_text=large_font.render("You timed out",True,(255,0,0))
 opp_timeout_text=large_font.render("Opponent timed out",True,(240,140,240))
 #endregion
@@ -1930,7 +1946,7 @@ while running:
         if sock in error_ready:
             raise RuntimeError(f"Mom, sockets are acting up again!\n{sock.error}")
         if tm.time() > next_send_g and state == "game":
-            if False not in [card.playable for card in player1.hand]:
+            if False not in [card.playable == False for card in player1.hand]:
                 write_buffer.append("xEND")
             else:
                 write_buffer.append("gEND")
@@ -2076,12 +2092,15 @@ while running:
                         selected="PORT"
                     elif Rect(300,425,900,100).collidepoint(pos):
                         selected="IP"
-                    elif ip_submit_text.textrect.collidepoint(pos) and connect_state == "connecting":
+                    elif ip_submit_text.textrect.collidepoint(pos):
+                        sock=socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                        sock.setblocking(False)
                         try:
                             sock.connect((HOST,int(PORT)))
                             state="pregame" #await info to build player2
                             print(f"{'\033[096m'}Connection successful{'\033[0m'}")
-                        except Exception as e:
+                        except IOError as e:
                             print(f"{'\033[91m'}{str(e)}{'\033[0m'}")
                             if e.errno == 10035:
                                 print(f"{'\033[93m'}Err. 10035: Skipped as per regulation{'\033[0m'}")
@@ -2089,10 +2108,13 @@ while running:
                                 print(f"{'\033[096m'}Connection successful{'\033[0m'}")
                             else:
                                 markers["retry"]=True
+                                sock.close()
+                        except Exception as e:
+                            markers["retry"]=True
+                            sock.close()
+                    elif connecting_back_text.textrect.collidepoint(pos):
+                        connect_state="idle"
                 elif connect_text.textrect.collidepoint(pos) and connect_state == "idle":
-                    sock=socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-                    sock.setblocking(False)
                     connect_state="connecting"
                 elif connecting_back_text.textrect.collidepoint(pos) and connect_state == "connecting":
                     connect_state="idle"
@@ -2448,7 +2470,9 @@ while running:
         elif e.type == MOUSEBUTTONUP and state in game_overs:
             pos = mouse.get_pos()
             if to_menu_text.textrect.collidepoint(pos):
-                sock=''
+                if type(sock) == socket.socket:
+                    sock.close()
+                    sock=''
                 state = "menu"
                 connect_state="idle"
                 deck=[]
@@ -2458,8 +2482,6 @@ while running:
                 abs_subturn=1
                 postsubturn=1
                 attack_choosing_state=False
-                HOST=''
-                sock=''
                 markers={"retry":False, "deck built":False, "do not connect":True, "start of turn called":False, "not enough souls":[0,0,0,0], "data received, proceed":False, "just chose":False, "finishable":True, "freeze":False, "game over called":False, "fade":[0,[0,0,0],0,0,0], "start of move called":False,"item stealing":(False, None),"forage":False,"monkey":0,"until end just changed":False,"concede":None,"await p2":False,"disconnecting":False,"hide large":False,"just selected":False,"uninstalling":False,"name sent":False,"sock closed":False,"you timeout":False}
                 selected=None
                 hide_large=False
@@ -2660,7 +2682,7 @@ while running:
                 draw.rect(screen,ORANGE,temp,5)
                 draw.rect(screen,(255,255,255),Rect(temp.centerx-20,temp.centery-5,40,10))
                 draw.rect(screen,(255,255,255),Rect(temp.centerx-5,temp.centery-20,10,40))
-        if postsubturn >= 2:
+        if postsubturn >= 2 and not markers["await p2"]:
             skippost=True
             if postsubturn < 5 and player1.field[postsubturn-2] != None:
                 if "end of turn" in player1.field[postsubturn-2].passives:
@@ -2669,6 +2691,14 @@ while running:
                 if "end of turn" in player1.field[postsubturn-2].items:
                     for subitem in player1.field[postsubturn-2].items["end of turn"]:
                         subitem.effect(origin=player1.field[postsubturn-2],player=player1,item=subitem)
+                    skippost=False
+            if postsubturn < 5 and player2.field[postsubturn-2] != None:
+                if "end of turn" in player2.field[postsubturn-2].passives:
+                    player2.field[postsubturn-2].passives["end of turn"](origin=player2.field[postsubturn-2],player=player2,loc=(player2.field[postsubturn-2].rect.x,player2.field[postsubturn-2].rect.y))
+                    skippost=False
+                if "end of turn" in player2.field[postsubturn-2].items:
+                    for subitem in player2.field[postsubturn-2].items["end of turn"]:
+                        subitem.effect(origin=player2.field[postsubturn-2],player=player2,item=subitem)
                     skippost=False
             if skippost:
                 postsubturn += 1
@@ -2770,10 +2800,6 @@ while running:
         screen.blit(mjgs.render(f"Abs:{str(abs_subturn)}, Sub:{str(subturn)}",True,(255,255,255)),(0,0))
 
     if state in game_overs:
-        if not markers["sock closed"] and not markers["do not connect"]:
-            sock.close()
-            sock=''
-            markers["sock closed"]=True
         colourval = markers["fade"][1]+[markers["fade"][3]]
         temps=Surface(window_dim).convert_alpha()
         temps.set_alpha(markers["fade"][3])
@@ -2903,7 +2929,8 @@ while running:
     2. Get item stealing to work
     3. HOLD: Implement setting colour for decks
     4. Add auto-updater feature
-    5. Postsubturns for player 2
+    5. CURRENTLY TESTING: Postsubturns for player 2
 
     Bugs:
+    None: None!
     '''

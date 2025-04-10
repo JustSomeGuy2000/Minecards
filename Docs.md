@@ -199,3 +199,6 @@ if every card has been covered (postsubturn >= 5):
     postsubturn = 1
     turn += 1
 ```
+
+
+# Problem-solving space
