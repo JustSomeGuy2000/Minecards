@@ -764,19 +764,24 @@ class DeckPreset(): #this gets confusing fast so I'll be leaving some comments
         global chosen_deck
         global decklist_p1
         global menu_deck_selected_text
+        return_val=False
         if items_left[1].collidepoint(pos) and self.item_offset > 0:
             self.item_offset -= 1
             for item in list(self.items.keys()):
                 item.rect.x += (cut_dim[0]+20)
+            return_val=True
         elif items_right[1].collidepoint(pos) and sum(list(self.items.values())) > 8 and not 8+self.item_offset == sum(list(self.items.values())):
             self.item_offset += 1
             for item in list(self.items.keys()):
                 item.rect.x -= (cut_dim[0]+20)
+            return_val=True
         elif select_deck_text.textrect.collidepoint(pos):
             if self.usable == True:
                 chosen_deck=self
                 decklist_p1={"mobs":{eval(mob):self.original_mobs[mob] for mob in self.original_mobs},"items":{eval(item):self.original_items[item] for item in self.original_items}}
                 menu_deck_selected_text=mjgs.render(chosen_deck.name,True,contrast(chosen_deck.colour))
+            return_val=True
+        return return_val
     
     def deck_delete_clicks(self,pos:Coord):
         global deleting_deck
@@ -956,7 +961,7 @@ def len_items(items:dict) -> int:
 
 def contrast(colour:tuple[int,int,int]):
     brightness=0.299*colour[0] + 0.587*colour[1] + 0.114*colour[2]
-    if brightness <= 0.5:
+    if brightness < 100:
         return (255,255,255)
     else:
         return (0,0,0)
@@ -1764,6 +1769,8 @@ write_buffer:list[str]=[]
 player2name:str=None
 next_send_g:int=0
 p2_progress_turn:bool=False
+deck_colour_choosing=False
+editing_colour=None
 #endregion
 
 #region card definitions
@@ -1882,6 +1889,10 @@ multiplayer_text=ClickableText(mjgs,"Host Game",(0,0,0),(window_dim[0]*7/18-mjgs
 you_timeout_text=large_font.render("You timed out",True,(255,0,0))
 opp_timeout_text=large_font.render("Opponent timed out",True,(240,140,240))
 host_back_text=ClickableText(mjgs,"Back",(0,0,0),(window_dim[0]/2-mjgs.size("Back")[0]/2,810))
+red_text=mjgs.render("Red",True,(255,0,0))
+green_text=mjgs.render("Green",True,(0,255,0))
+blue_text=mjgs.render("Blue",True,(0,0,255))
+colour_texts=[red_text,green_text,blue_text]
 #endregion
 
 while running:
@@ -2160,6 +2171,7 @@ while running:
                 if decks_to_menu_text.textrect.collidepoint(pos):
                     state="menu"
                     selected_deck=None
+                    deck_colour_choosing=False
                     selected=None
                     selected_large=None
                     chosen_deck.unpack(chosen_deck.mobs,chosen_deck.items,"whitelist",[])
@@ -2197,11 +2209,16 @@ while running:
                 elif deck_inspects_to_presets_text.textrect.collidepoint(pos):
                     selected=None
                     selected_deck=None
+                    deck_colour_choosing=False
                     selected_large=None
                 else:
-                    selected_deck.deck_other_clicks(pos)
                     temp=False
-                    if selected_deck.title_bg_rect.collidepoint(pos):
+                    if selected_deck.deck_other_clicks(pos):
+                        pass
+                    elif colour_wheel_rect.collidepoint(pos):
+                        deck_colour_choosing=not deck_colour_choosing
+                        editing_colour=None
+                    elif selected_deck.title_bg_rect.collidepoint(pos):
                         editing_deck_title=True
                         temp=True
                     elif editing_deck_title == True:
@@ -2253,6 +2270,10 @@ while running:
                             selected_deck.unpack(selected_deck.original_mobs,selected_deck.original_items)
                         else:
                             move_hovering_over=None
+                    if deck_colour_choosing:
+                        for i in range(3):
+                            if Rect(1190,105+70*i,150,50).collidepoint(pos):
+                                editing_colour=i
 
             elif state == "game" and not attack_progressing:
                 for card in player1.field:
@@ -2502,6 +2523,27 @@ while running:
                 elif len(playername) < 15:
                     playername += e.unicode
                 playername_text=mjgs.render(f"Name: {playername}",True,(0,0,0))
+            if type(editing_colour) == int:
+                if e.key in [K_0,K_1,K_2,K_3,K_4,K_5,K_6,K_7,K_8,K_9]:
+                    temp=list(selected_deck.colour)
+                    temp[editing_colour]=int(str(temp[editing_colour])+e.unicode)
+                    if temp[editing_colour] <= 255:
+                        selected_deck.colour=tuple(temp)
+                        selected_deck.text=large_font.render(selected_deck.name,True,contrast(temp))
+                        menu_deck_selected_text=mjgs.render(selected_deck.name,True,contrast(temp))
+                elif e.key == K_BACKSPACE:
+                    temp=list(selected_deck.colour)
+                    temp[editing_colour]=str(temp[editing_colour])[:-1]
+                    if temp[editing_colour] != '':
+                        temp[editing_colour]=int(temp[editing_colour])
+                    else:
+                        temp[editing_colour]=0
+                    selected_deck.colour=tuple(temp)
+                    selected_deck.text=large_font.render(selected_deck.name,True,contrast(temp))
+                    menu_deck_selected_text=mjgs.render(selected_deck.name,True,contrast(temp))
+                elif e.key in [K_RETURN, K_ESCAPE]:
+                    editing_colour=None
+                    deck_colour_choosing=False
 
     if state == "menu":
         screen.blit(title_img,(window_dim[0]/2-421,165))
@@ -2612,6 +2654,17 @@ while running:
             if not temp:
                 selected_deck.set_renders(None)
                 selected=None
+            if deck_colour_choosing and not cards_sidebar:
+                draw.rect(screen,(255,255,255),Rect(window_dim[0]-450,100,300,200))
+                screen.blit(red_text,(window_dim[0]-420,110))
+                screen.blit(green_text,(window_dim[0]-440,175))
+                screen.blit(blue_text,(window_dim[0]-420,240))
+                for i in range(3):
+                    draw.rect(screen,(200,200,200),Rect(1190,105+70*i,150,50))
+                    screen.blit(mjgs.render(str(selected_deck.colour[i]),True,(0,0,0)),(1200,110+70*i))
+                if editing_colour != None:
+                    if tm.time()%1>0.5:
+                        draw.rect(screen,(0,0,0),Rect(1200+mjgs.size(str(selected_deck.colour[editing_colour]))[0],105+70*editing_colour,5,50))
 
     elif state == "pregame":
         markers["do not connect"]=False
@@ -2901,11 +2954,8 @@ while running:
 
     '''
     To-do:
-    1. Does item application count as a subturn?
-    2. Get item stealing to work
-    3. HOLD: Implement setting colour for decks
-    4. Add auto-updater feature
-    5. CURRENTLY TESTING: Postsubturns for player 2
+    1. Get item stealing to work
+    2. Add auto-updater feature
 
     Bugs:
     None: None!
