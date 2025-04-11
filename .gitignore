@@ -1,3 +1,4 @@
 .venv
 Info.bin RW.py
 .vscode
+__pycache__

@@ -443,19 +443,13 @@ class Player():
                     if card.status[effect] > 0:
                         screen.blit(effect_sprites[effect],(card_pos[0]+25*temp,hearts_rails[2-self.player_number]+copysign(25,(1.5-self.player_number)*-1)))
                         temp+=1
+                check_actionable(card,card,None,self,"always")
                 if card.health <= 0:
-                    result=None
-                    if "on death" in card.passives:
-                        result=card.passives["on death"](origin=card,player=self,loc=(card.rect.x,card.rect.y))
-                    if "on death" in card.items:
-                        for subitem in card.items["on death"]:
-                            result=subitem.effect(origin=card,player=self,item=subitem)
+                    result=check_actionable(card,card,None,self,"on death")
                     if result != False:
                         if card.proxy_for != None:
                             card.proxy_for.proxy=None
                         self.field[self.field.index(card)]=None
-                if "always" in card.passives:
-                    card.passives["always"](origin=card,player=self,loc=(card.rect.x,card.rect.y))
         screen.blit(soul,self.souls_pos)
         screen.blit(mjgs.render(str(self.souls),True,tuple(self.soul_colour)),(self.souls_pos[0]+token_dim[0]+5,self.souls_pos[1]-2))
         if self.player_number == 1 and markers["not enough souls"][0] != 0:
@@ -577,10 +571,7 @@ class Ability():
         else:
             opp=player1
         match=opp.field[kwargs["player"].field.index(kwargs["origin"])]
-        if "on action" in kwargs["origin"].items:
-            maybe=tuple(kwargs["origin"].items["on action"])
-            for subitem in maybe:
-                stop=subitem.effect(origin=kwargs["origin"],target=kwargs["target"],player=kwargs["player"],item=subitem)
+        stop=check_actionable(kwargs["origin"],kwargs["origin"],kwargs["target"],kwargs["player"],"on action")
         if stop == True or (match != None and match.name == "Frog"): #egg rain and tongue snare
             result=None
         else:
@@ -901,17 +892,9 @@ def excepthook(type, value, traceback):
 
 def start_of_turn():
     for card in player1.field:
-        if card != None and "start of turn" in card.passives:
-            card.passives["start of turn"](loc=(card.rect.x,card.rect.y))
-        if card != None and "start of turn" in card.items:
-            for subitem in card.items["start of turn"]:
-                subitem.effect(item=subitem,origin=card,player=player1)
+        check_actionable(card,card,None,player1,"start of turn")
     for card in player2.field:
-        if card != None and "start of turn" in card.passives:
-            card.passives["start of turn"](loc=(card.rect.x,card.rect.y))
-        if card != None and "start of turn" in card.items:
-            for subitem in card.items["start of turn"]:
-                subitem.effect(item=subitem,origin=card,player=player2)
+        check_actionable(card,card,None,player2,"start of turn")
 
 def deckbuilder(list_to_use:dict[Card,int]) -> list[Card]:
     here_deck=[]
@@ -1146,16 +1129,14 @@ def uninstall(arg):
     rmtree(__path__,onexc=retry_del)
     rmtree(arg,onexc=retry_del)
 
-def check_actionable(origin:Mob,target:Mob,player:Player,condition:str,dmg:int=None) -> bool:
-    if condition in origin.items:
-        temp=tuple(origin.items[condition])
+def check_actionable(check_from:Mob,origin:Mob,target:Mob,player:Player,condition:str,spec=None) -> bool:
+    if condition in check_from.items:
+        temp=tuple(check_from.items[condition])
         for item in temp:
-            result=item.effect(origin=origin,target=target,player=player,item=item)
-    if condition in origin.passives:
-        result=origin.passives[condition](origin=origin,target=target,player=player,loc=(origin.rect.x+cut_dim[0]/2,origin.rect.y))
-    if condition in origin.abilities:
-        result=origin.abilities[condition](origin=origin,target=target,player=player,loc=(origin.rect.x+cut_dim[0]/2,origin.rect.y))
-    return result
+            spec=item.effect(origin=origin,target=target,player=player,item=item,original=spec)
+    if condition in check_from.passives:
+        spec=check_from.passives[condition](origin=origin,target=target,player=player,loc=(check_from.rect.x+cut_dim[0]/2,check_from.rect.y),damage=spec)
+    return spec
 
 def atk_check(func) -> bool: #decorator that applies to all attacks
     def atk_wrapper(**kwargs):
@@ -1170,30 +1151,20 @@ def atk_check(func) -> bool: #decorator that applies to all attacks
                 markers["forage"]=False
             if len(result) == 2:
                 result.append([kwargs["target"]])
-            if "on action" in kwargs["origin"].items:
-                maybe=tuple(kwargs["origin"].items["on action"])
-                for subitem in maybe:
-                    stop=subitem.effect(origin=kwargs["origin"],target=kwargs["target"],player=kwargs["player"],item=subitem)
+            stop=check_actionable(kwargs["origin"],kwargs["origin"],kwargs["target"],kwargs["player"],"on action",result)
             for card in result[2]:
                 if stop == True:
                     break
-                if "on attack" in kwargs["origin"].items:
-                    maybe=tuple(kwargs["origin"].items["on attack"])
-                    for subitem in maybe:
-                        result=subitem.effect(origin=kwargs["origin"],target=card,player=kwargs["player"],original=result,item=subitem)
-                        if len(result) == 4:
-                            break
+                result=check_actionable(kwargs["origin"],kwargs["origin"],kwargs["target"],kwargs["player"],"on attack",result)
+                if len(result) == 4:
+                    break
                 if card.proxy != None:
                     card=card.proxy
                 card.hurt(result[1])
                 if kwargs["origin"] in player2.field: #quick strike
                     for mob in [mob for mob in player1.field if (mob != None and mob.name == "Horse")]:
                         mob.passives["special: quick strike"](origin=kwargs["origin"],target=kwargs["target"],player=kwargs["player"],striker=mob,loc=(mob.rect.x,mob.rect.y))
-                if "on hurt" in card.passives and result[1] != 0:
-                    card.passives["on hurt"](origin=kwargs["origin"],target=card,player=kwargs["player"],damage=result[1],loc=(card.rect.x,card.rect.y))
-                if "on hurt" in card.items and result[1] != 0:
-                    for subitem in card.items["on hurt"]:
-                        subitem.effect(origin=kwargs["origin"],target=card,player=kwargs["player"],original=result[1],item=subitem)
+                check_actionable(card,kwargs["origin"],card,kwargs["player"],"on hurt",result[1])
             return result[0]
         else:
             return func(origin=kwargs["origin"],target=kwargs["target"],player=kwargs["player"],noattack=True)[0]
@@ -1910,6 +1881,7 @@ singleplayer_text=ClickableText(mjgs,"Singleplayer",(0,0,0),(window_dim[0]*11/18
 multiplayer_text=ClickableText(mjgs,"Host Game",(0,0,0),(window_dim[0]*7/18-mjgs.size("Host Game")[0]/2,550))
 you_timeout_text=large_font.render("You timed out",True,(255,0,0))
 opp_timeout_text=large_font.render("Opponent timed out",True,(240,140,240))
+host_back_text=ClickableText(mjgs,"Back",(0,0,0),(window_dim[0]/2-mjgs.size("Back")[0]/2,810))
 #endregion
 
 while running:
@@ -1964,8 +1936,7 @@ while running:
         if until_end <= 0 and next_turn:
             corr_subturn=list(filled_positions.keys())[abs_subturn%len(filled_positions)]
             if player2.field[corr_subturn-1] != None:
-                if "end this turn" in player2.field[corr_subturn-1].passives:
-                    player2.field[corr_subturn-1].passives["end this turn"](origin=player2.field[corr_subturn-1],player=player2,loc=(player2.field[corr_subturn-1].rect.x,player2.field[corr_subturn-1].rect.y+cut_dim[1]/2))
+                check_actionable(player2.field[corr_subturn-1],player2.field[corr_subturn-1],None,player2,"end this turn")
                 if player2.field[corr_subturn-1].status["psn"] > 0:
                     player2.field[corr_subturn-1].hurt(1,"psn")
                     player2.field[corr_subturn-1].status["psn"] -= 1
@@ -2113,6 +2084,11 @@ while running:
                             markers["retry"]=True
                             sock.close()
                     elif connecting_back_text.textrect.collidepoint(pos):
+                        connect_state="idle"
+                elif state == "menu" and connect_state == "hosting":
+                    if host_back_text.textrect.collidepoint(pos):
+                        sock.close()
+                        sock=''
                         connect_state="idle"
                 elif connect_text.textrect.collidepoint(pos) and connect_state == "idle":
                     connect_state="connecting"
@@ -2412,8 +2388,7 @@ while running:
                     if type(selected) == Item:
                         selected=player1.field[subturn-1]
                     if selected != None:
-                        if "end this turn" in selected.passives:
-                            selected.passives['end this turn'](origin=selected,player=player1,loc=(selected.rect.x,selected.rect.y))
+                        check_actionable(selected,selected,None,player1,"end this turn")
                         if selected.status["psn"] > 0:
                             selected.hurt(1,"psn")
                             selected.status["psn"] -= 1
@@ -2546,6 +2521,7 @@ while running:
             port_text=mjgs.render("Port: "+str(temp[1]),True,(0,0,0))
             screen.blit(ip_text,(window_dim[0]/2-ip_text.get_width()/2,400))
             screen.blit(port_text,(window_dim[0]/2-port_text.get_width()/2,500))
+            screen.blit(host_back_text.text,host_back_text.position)
         elif connect_state == "connecting":
             draw.rect(screen,(255,255,255),Rect(300,625,900,100))
             draw.rect(screen,(255,255,255),Rect(300,425,900,100))
@@ -2738,8 +2714,8 @@ while running:
             subturn=list(filled_positions.keys())[abs_subturn%len(filled_positions)]+1
         if postsubturn == 1:
             draw.rect(screen,(255,255,255),Rect(player1.field_pos[subturn-1][0],player1.field_pos[subturn-1][1]+cut_dim[1]+10,cut_dim[0],10))
-            if markers["start of move called"] == False and player1.field[subturn-1] != None and "on this turn" in player1.field[subturn-1].passives:
-                player1.field[subturn-1].passives["on this turn"](player=player1,origin=player1.field[subturn-1],loc=(player1.field[subturn-1].rect.x,player1.field[subturn-1].rect.y))
+            if markers["start of move called"] == False and player1.field[subturn-1] != None:
+                check_actionable(player1.field[subturn-1],player1.field[subturn-1],None,player1,"on this turn")
                 markers["start of move called"]=True
         else:
             draw.rect(screen,(255,255,255),Rect(player1.field_pos[postsubturn-2][0],player1.field_pos[postsubturn-2][1]+cut_dim[1]+10,cut_dim[0],10))

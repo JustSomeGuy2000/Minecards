@@ -2,15 +2,19 @@
 "end of turn": Called at the end of the attack phase
 "start of turn": Called at the start of the turn, in the function start_of_turn()
 "on death": Called when health is 0
+    These can return a single value. If False, the mob does not die.
 "on hurt": Called when health decreases
+    These take an extra parameter "damage", how much damage the Mob took.
 "on attack": Called when this attacks
+    These take an extra parameter "original", the original attack tuple
+    These return a modified attak tuple.
 "on this turn: Called at the start of this mob's move
 "end this turn": Called immediately after this mob's move
 "when played": Called immediately
 "always": Checks all the time
 "on action": Called when an ability, or attack activates
 
-# Effect format and return requirements
+# Actionable format and return requirements
 ## Attacks:
 Attacks take 4 arguments: origin, target, player and noattack.
 Origin is the attacking mob.
@@ -18,7 +22,7 @@ Target is the target mob.
 Player is the player the attacking mob belongs to (since it's too late now to make player a variable of Card)
 Noattack is a boolean value that dictates whether an attack actually takes place.
 
-Attacks return two{three} values: [0]:bool, [1]:int, {[2]:list}.
+Attacks return two{three} basic values: [0]:bool, [1]:int, {[2]:list}.
 [0] is a boolean value that is True for melee attacks and False for ranged ones.
 [1] is the damage the attack deals.
 [2] is a list of targets. The attack is executed on all of them. Can be omitted if there is only one target.
@@ -44,57 +48,44 @@ def purple(**kwargs:Attack_params) -> tuple[Literal[False],int,list[Card]]:
 ```
 
 ## Passives:
-Passives take four or five arguments: origin, target, player, loc and {damage}.
+Passives take four basic arguments: origin, target, player, loc.
 Origin is the mob that is attacking.
 Target is the target mob.
 Player is the player the attacking mob belongs to
 Loc is the coordinates of the card that used the passive
     Used by psv_check to add to linger_anims
-{Damage} is how much damage the target is receiving.
-    Used only for "on hurt" passives.
 
-Passives return one or two values: [0]:bool and {[1]:bool}.
+Passives usually return one or two values: [0]:bool and {[1]:bool}.
 [0] is a boolean value indicating if the passive's effect took place.
     This is used in psv_check() to set Mob.move_anim
-[1] is only used in on death passives.
-    If False, the mob does not die. Any other value and it does.
 
 ## Abilities
 Abilities are differentiated from passives since they have to be chosen, and from attacks because they cannot be countered and usually deal no damage.
-Abilities take four arguments: origin, target, player and loc.
+Abilities take four basic arguments: origin, target, player and loc.
 Origin is the attacking mob.
 Target is the target mob.
 Player is the player the attacking mob belongs to.
 Loc is the coordinates of the card that used the ability
     Used by psv_check to add to linger_anims
 
-Abilities return one or two values: [0]:bool and {[1]:str}.
+Abilities usually return one or two values: [0]:bool and {[1]:str}.
 [0] is a boolean value indicating if the ability's effect took place.
     This is used in psv_check() to set Mob.move_anim
 [1] is a versatile string used to modulate several routines.
     [1]="break", used by wool_guard(), stops the attack routine from cycling through the rest of the targets in the target list. I can't remember why this is needed but it's best not to touch it.
 
 ## Items
-Item effects take six arguments: origin, target, player, item, only_targeting and original/damage.
+Item effects take five basic arguments: origin, target, player, item and only_targeting.
 Origin is the mob that is attacking.
 Target is the target mob.
 Player is the player the attacking mob belongs to.
 Item is the item calling the effect.
 Only_targeting is a boolean value specifying if only the target list should be returned.
     This should not be called externally. It is handled by itm_check()
-Original/damage is the damage being dealt.
-    Damage is used in "on hurt" items, while original is used in "on attack" items. Don't ask me why. Its probably going to cause trouble in the future.
 
-Items return none to two values or one value: {[0]:list} or {[1]:list[bool,int,list]}.
+Items usually return no to one value/s: {[0]:list}.
 [0] is a list of the item's targets.
     The effect is executed on all of them. Only returned if only_targeting is True. Can be [None] if the item is not executed on a card (e.g. Loot Chest)
-[1] is the modified original value, composed of whether the attack is melee or ranged, its damage and its targets.
-    Used only by "on attack" items.
-    A fourth value is sometimes added. The presence of this value causes the item scanning routine to break.
-    itm_check() uses this as the new attack value for the current card.
-
-Items that stop execution of the rest of the check only return one value.
-If True, the check stops, otherwise it doesn't.
 
 # Certain variables
 ## linger_anims
