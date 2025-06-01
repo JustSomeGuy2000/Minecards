@@ -69,7 +69,7 @@ class Menu():
             element.display(surface,events,game)
 
 class Animation():
-    def __init__(self,duration:float,target:Element,next=None): # type: ignore
+    def __init__(self,duration:float,target:Element,next=None):
         self.duration=duration
         self.current:float=0.0
         self.target=target
@@ -77,7 +77,7 @@ class Animation():
         self.updater:Callable[[Animation,Element,Game],Any]=None
     
     @classmethod
-    def set_updater(cls,updater:Callable[[Animation,Element,Game],Any]):
+    def set_updater(cls,updater:Callable[[Self,Element,Game],Any]):
         cls.updater=updater
 
     def update(self,events:Events,game:Game):
