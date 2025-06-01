@@ -80,7 +80,7 @@ class Animation():
         self.hold:bool=hold
     
     @classmethod
-    def set_updater(cls,updater:Callable[[Animation,Game],Any]):
+    def set_updater(cls,updater:Callable[[Self,Element,Game],Any]):
         cls.updater=updater
 
     def update(self,events:Events,game:Game):
