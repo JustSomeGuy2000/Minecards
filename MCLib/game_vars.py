@@ -15,3 +15,16 @@ class Game():
         self.FPS=60
         self.clock=time.Clock()
         self.menu:str=MAIN_MENU
+        self.animations:list=[]
+        self.hold:bool=False
+
+    def update_anims(self,events):
+        holds:list[bool]=[]
+        for anim in self.animations:
+            result=anim.update(events,self)
+            holds.append(anim.hold)
+            
+        if any(holds):
+            self.hold=True
+        else:
+            self.hold=False

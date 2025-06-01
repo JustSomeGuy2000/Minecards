@@ -17,6 +17,7 @@ main_menu=Menu([title,beta_text,host_game_text,join_game_text,start_game_text,to
 
 mp=mouse.get_pos()
 dt=0
+debug:bool=True
 while v.running:
     v.screen.blit(v.background,(0,0))
 
@@ -46,6 +47,8 @@ while v.running:
             msy=e.y
         elif e.type == KEYDOWN:
             kp_frame.append(e)
+            if e.key == K_d:
+                debug=not debug
         elif e.type == VIDEORESIZE:
             v.background=transform.scale(v.background,e.size)
     event_suite:Events=Events(md,mu,dmx,dmy,kp_current,km,msx,msy,mp,wx,wy,dt,kp_frame)
@@ -53,8 +56,9 @@ while v.running:
     if v.menu == MAIN_MENU:
         main_menu.display(v.screen,event_suite,v)
 
-    mp_text=MJGS_S.render("  "+str(mp),True,BLACK)
-    draw.rect(v.screen,WHITE,mp_text.get_rect(x=mp[0],y=mp[1]))
-    v.screen.blit(mp_text,mp)
+    if debug:
+        mp_text=MJGS_S.render("  "+str(mp),True,BLACK)
+        draw.rect(v.screen,WHITE,mp_text.get_rect(x=mp[0],y=mp[1]))
+        v.screen.blit(mp_text,mp)
     display.update()
     dt=v.clock.tick(v.FPS)

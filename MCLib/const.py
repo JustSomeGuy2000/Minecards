@@ -18,8 +18,11 @@ BLACK:Colour=(0,0,0)
 WHITE:Colour=(255,255,255)
 ORANGE:Colour=(255,180,0)
 
-ALIGN_CENTER="Align center"
-ALIGN_CORNER="Align corner"
+ALIGN_CENTER="center"
+ALIGN_LEFT="left"
+ALIGN_RIGHT="right"
+ALIGN_TOP="top"
+ALIGN_BOTTOM="bottom"
 
 AS_ABSOLUTE="Absolute coordinates"
 AS_RATIO="Ratio according to base screen size"
