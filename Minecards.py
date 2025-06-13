@@ -1,5 +1,7 @@
-from pygame import *
+from __future__ import annotations
 from MCLib.const import *
+
+type Card=Mob|Item
 
 class Events():
     def __init__(self,md:bool=False,mu:bool=False,dmx:int=0,dmy:int=0,kp_current:key.ScancodeWrapper={},km:int=0,msx:int=0,msy:int=0,mp:tuple[int,int]=(0,0),wx:int=0,wy:int=0,dt=0,kp_frame:list[event.Event]=[]):
@@ -34,12 +36,22 @@ class Game():
         self.animations:list[Animation]=[]
         self.hold:bool=False
 
-    def update_anims(self,events):
+    def update_anims(self,events:Events):
         holds:list[bool]=[]
+        remove:list[Animation]=[]
+        add:list[Animation]=[]
         for anim in self.animations:
             result=anim.update(events,self)
             holds.append(anim.hold)
-            
+            if isinstance(result, Animation):
+                if anim.current >= anim.duration:
+                    remove.append(anim)
+                add.append(result)
+            elif result == None:
+                remove.append(anim)
+        for anim in remove:
+            self.animations.remove(anim)
+        self.animations.extend(add)
         if any(holds):
             self.hold=True
         else:
@@ -103,6 +115,9 @@ class Element():
         if events.mu and self.rect.collidepoint(events.mp) and self.on_click != None:
             self.on_click(game)
 
+    def reposition(self, new:Coord):
+        ...
+
 class Menu():
     def __init__(self,elements:list[Element],identifier):
         self.elements=elements
@@ -113,18 +128,14 @@ class Menu():
             element.display(surface,events,game)
 
 class Animation():
-    def __init__(self,duration:float,target:Element,next=None,hold:bool=False,*args):
+    def __init__(self,duration:float,target:Element,next:None|Self|Callable[[Self,Game],Self]=None,hold:bool=False,**kwargs):
         self.duration=duration
         self.current:float=0.0
         self.target=target
-        self.next:None|Animation|Callable[[Animation,Game],Animation]=next
+        self.next=next
         self.updater:Callable[[Animation,Game],Any]=None
-        self.update_args=args
+        self.update_kwargs=kwargs
         self.hold:bool=hold
-    
-    @classmethod
-    def set_updater(cls,updater:Callable[[Self,Game],Any]):
-        cls.updater=updater
 
     def update(self,events:Events,game:Game):
         self.current += events.dt
@@ -137,13 +148,101 @@ class Animation():
                 return None
         result=self.updater(self,game)
         return result
-    
-def make_animation(updater:Callable[[Animation,Game],Any], name:str) -> type:
-    '''Make an animation using updater as the animation function. The variable it is bound to should be as the name passed as an argument. Not doing so may cause strange effects.'''
-    new_anim:Animation=type(name,(Animation))
-    new_anim.set_updater(updater)
-    return new_anim
 
+class Mob():
+    def __init__(self, name:str, cost:int, health:int, moves:list[Move], mob_class:str, biome:str, border:str, front_sprite:Surface, cut_sprite:Surface, back_sprite:Surface, id_num:int, initpos:Coord=(0,0), large_size:Coord=CARD_DIM, cut_size:Coord=CUT_DIM, **kwargs):
+        self.name=name
+        self.cost=cost
+        self.health=health
+        self.moves=moves
+        self.mob_class=mob_class
+        self.biome=biome
+        self.border=border
+        self.large_size=large_size
+        self.cut_size=cut_size
+        self.front_sprite=transform.scale(front_sprite,large_size).convert_alpha()
+        self.cut_sprite=transform.scale(cut_sprite,cut_size).convert_alpha()
+        self.back_sprite=transform.scale(back_sprite,large_size).convert_alpha()
+        self.current_sprite=self.back_sprite
+        self.pos=Proportion(initpos[0],initpos[1])
+        self.rect=self.current_sprite.get_rect(topleft=initpos)
+        self.id_num=id_num
+        self.initpos=initpos
+        self.extras=kwargs
+
+        self.items:list[Item]=[]
+        self.playable:bool=True
+        self.proxy_for:Mob|None=None
+        self.proxy:Mob|None=None
+        self.owned_by:Player|None=None
+
+    def display(self, surface:Surface, events:Events, game:Game):
+        surface.blit(self.current_sprite,self.rect)
+
+    def reposition(self, new:Coord):
+        ...
+
+class Item():
+    def __init__(self, name:str, cost:int, health:int, effect:Move, border:str, front_sprite:Surface, cut_sprite:Surface, back_sprite:Surface, id_num:int, initpos:Coord=(0,0), large_size:Coord=CARD_DIM, cut_size:Coord=CUT_DIM, **kwargs):
+        self.name=name
+        self.cost=cost
+        self.health=health
+        self.effect=effect
+        self.border=border
+        self.large_size=large_size
+        self.cut_size=cut_size
+        self.front_sprite=transform.scale(front_sprite,large_size).convert_alpha()
+        self.cut_sprite=transform.scale(cut_sprite,cut_size).convert_alpha()
+        self.back_sprite=transform.scale(back_sprite,large_size).convert_alpha()
+        self.current_sprite=self.back_sprite
+        self.pos=Proportion(initpos[0],initpos[1])
+        self.rect=self.current_sprite.get_rect(topleft=initpos)
+        self.id_num=id_num
+        self.initpos=initpos
+        self.extras=kwargs
+
+        self.playable:bool=True
+        self.owned_by:Player|None=None
+        self.attached_to:Mob|None=None
+
+    def display(self, surface:Surface, events:Events, game:Game):
+        surface.blit(self.current_sprite,self.rect)
+
+    def reposition(self, new:Coord):
+        ...
+
+
+class Player():
+    def __init__(self, id_num:int, hand_anchor:Coord, field_positions:list[Coord], name:str|None=None):
+        self.id_num=id_num
+        self.hand_anchor=hand_anchor
+        self.field_positions=field_positions
+        self.name=name
+
+        self.souls:int=STARTING_SOULS
+        self.hand:list[Card]=[]
+        self.field:list[Card|None]=[None,None,None]
+        self.deck:list[Card]=[]
+
+    def display(self, surface:Surface, events:Events, game:Game):
+        for card in self.hand:
+            card.display(surface, events, game)
+        for slot in self.field:
+            if isinstance(slot,Card):
+                slot.display(surface, events, game)
+
+class MoveInfo():
+    ...
+
+class Move():
+    def __init__(self, type:MoveType, condition:list[Condition], effect:Callable[[MoveInfo,Game],None], targets:Callable[[MoveInfo,Game],None]):
+        self.type=type
+        self.condition=condition
+        self.effect=effect
+        self.targets=targets
+
+    def use(self, info:MoveInfo, game:Game):
+        return self.effect(info, game)
 
 title=Element(0.5,165,r"Assets\title.png",x_coord_type=AS_RATIO,image_size=(842,120),str_type=AS_PATH)
 beta_text=Element(0.5,270,"Closed Beta (Rebuild)",font=MJGS_M,colour=ORANGE,x_coord_type=AS_RATIO,str_type=AS_STR)
@@ -177,6 +276,8 @@ while v.running:
     for e in event.get():
         if e.type == QUIT:
             v.running=False
+        if v.hold:
+            break
         elif e.type == MOUSEBUTTONDOWN:
             md=True
         elif e.type == MOUSEBUTTONUP:
@@ -194,10 +295,12 @@ while v.running:
 
     if v.menu == MAIN_MENU:
         main_menu.display(v.screen,event_suite,v)
+    v.update_anims(event_suite)
 
     if debug:
         mp_text=MJGS_S.render("  "+str(mp),True,BLACK)
         draw.rect(v.screen,WHITE,mp_text.get_rect(x=mp[0],y=mp[1]))
         v.screen.blit(mp_text,mp)
+
     display.update()
     dt=v.clock.tick(v.FPS)

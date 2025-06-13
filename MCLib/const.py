@@ -4,6 +4,9 @@ font.init()
 
 type Coord=tuple[int,int]
 type Colour=tuple[int,int,int]|tuple[int,int,int,int]
+type Path=str
+type Condition=str
+type MoveType=str
 
 BASE_WIN_X=1536
 BASE_WIN_Y=860
@@ -29,3 +32,25 @@ AS_RATIO="Ratio according to base screen size"
 
 AS_PATH="String is a path"
 AS_STR="String is a string to be rendered by the font"
+
+CARD_DIM:Coord=(150,225)
+CUT_DIM:Coord=(170,170)
+
+IS_ATTACK:MoveType="This move is an attack"
+IS_PASSIVE:MoveType="This move is a passive"
+IS_ABILITY:MoveType="This move is an ability"
+IS_ITEM:MoveType="This move belongs to an item"
+
+END_OF_CYCLE:Condition="When this cycle ends"
+START_OF_CYCLE:Condition="When this cycle starts"
+END_OF_TURN:Condition="After this moves"
+START_OF_TURN:Condition="Before this moves"
+ON_DEATH:Condition="When this dies"
+ON_HURT:Condition="When this loses health"
+ON_ATTACK:Condition="When this attacks"
+ON_ABILITY:Condition="When this uses an ability"
+ON_PASSIVE:Condition="When this uses a passive"
+WHEN_PLAYED:Condition="Activates immediately"
+ALWAYS:Condition="Checked every frame"
+
+STARTING_SOULS=20
