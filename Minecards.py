@@ -3,6 +3,14 @@ from MCLib.const import *
 
 type Card=Mob|Item
 
+class Displayable():
+    """Classes that have the display() method."""
+    def __init__(self):
+        pass
+
+    def display(self, surface:Surface, events:Events, game:Game):
+        pass
+
 class Events():
     def __init__(self,md:bool=False,mu:bool=False,dmx:int=0,dmy:int=0,kp_current:key.ScancodeWrapper={},km:int=0,msx:int=0,msy:int=0,mp:tuple[int,int]=(0,0),wx:int=0,wy:int=0,dt=0,kp_frame:list[event.Event]=[]):
         self.md=md #mouse down
@@ -20,21 +28,16 @@ class Events():
         self.dt=dt #change in time since last frame
 
 class Game():
-    def __init__(self):
-        init()
-        self.scrinfo=display.Info()
-        self.win_height:int=self.scrinfo.current_h-100
-        self.win_width:int=self.scrinfo.current_w
-        self.win_dim=(self.win_width,self.win_height)
-        self.screen=display.set_mode(self.win_dim,RESIZABLE)
-        display.set_caption("Minecards")
+    def __init__(self): 
         self.running:bool=True
-        self.background:Surface=transform.scale(image.load(r"Assets\background.png"),self.win_dim).convert()
+        self.background:Surface=transform.scale(image.load(r"Assets\background.png"),WIN_DIM).convert_alpha()
         self.FPS=60
         self.clock=time.Clock()
-        self.menu:str=MAIN_MENU
+        self.menu:str=MenuNames.MAIN_MENU
         self.animations:list[Animation]=[]
         self.hold:bool=False
+        self.player1:Player|None=None
+        self.player2:Player|None=None
 
     def update_anims(self,events:Events):
         holds:list[bool]=[]
@@ -57,6 +60,9 @@ class Game():
         else:
             self.hold=False
 
+    def publish(self, event:Condition):
+        ...
+
 v=Game()
 
 class Proportion():
@@ -71,8 +77,8 @@ class Proportion():
     def gen_pos(self,width:int,height:int) -> Coord:
         return (int(self.ratio_x*width),int(self.ratio_y*height))
     
-class Element():
-    def __init__(self, x_pos:int, y_pos:int, img:Surface|str, str_type=AS_STR, image_size:Coord|None=None,x_align_type:str=ALIGN_CENTER, y_align_type:str=ALIGN_CENTER, x_coord_type=AS_ABSOLUTE, y_coord_type=AS_ABSOLUTE, on_click:Callable[[Game],None]|None=None, font:font.Font=MJGS_M, colour:Colour=BLACK):
+class Element(Displayable):
+    def __init__(self, x_pos:int|float, y_pos:int|float, img:Surface|str, str_type=AS_STR, image_size:Coord|None=None,x_align_type:str=ALIGN_CENTER, y_align_type:str=ALIGN_CENTER, x_coord_type=AS_ABSOLUTE, y_coord_type=AS_ABSOLUTE, on_click:Callable[[Game],None]|None=None, font:font.Font=MJGS_M, colour:Colour=BLACK):
         if isinstance(img,Surface):
             self.img=img.convert_alpha()
             self.image_type="image"
@@ -118,8 +124,8 @@ class Element():
     def reposition(self, new:Coord):
         ...
 
-class Menu():
-    def __init__(self,elements:list[Element],identifier):
+class Menu(Displayable):
+    def __init__(self,elements:list[Displayable],identifier):
         self.elements=elements
         self.identifier=identifier
  
@@ -149,8 +155,8 @@ class Animation():
         result=self.updater(self,game)
         return result
 
-class Mob():
-    def __init__(self, name:str, cost:int, health:int, moves:list[Move], mob_class:str, biome:str, border:str, front_sprite:Surface, cut_sprite:Surface, back_sprite:Surface, id_num:int, initpos:Coord=(0,0), large_size:Coord=CARD_DIM, cut_size:Coord=CUT_DIM, **kwargs):
+class Mob(Displayable):
+    def __init__(self, name:str, cost:int, health:int, moves:list[Move], mob_class:str, biome:str, border:str, front_sprite:Surface, cut_sprite:Surface, id_num:int, initpos:Coord=(0,0), large_size:Coord=CARD_DIM, cut_size:Coord=CUT_DIM, back_sprite:Surface=CARDBACK, **kwargs):
         self.name=name
         self.cost=cost
         self.health=health
@@ -182,8 +188,23 @@ class Mob():
     def reposition(self, new:Coord):
         ...
 
-class Item():
-    def __init__(self, name:str, cost:int, health:int, effect:Move, border:str, front_sprite:Surface, cut_sprite:Surface, back_sprite:Surface, id_num:int, initpos:Coord=(0,0), large_size:Coord=CARD_DIM, cut_size:Coord=CUT_DIM, **kwargs):
+    def attack(self, move_num:int, game:Game):
+        ...
+
+    def non_attack_move(self, event:Condition, game:Game):
+        ...
+
+    def hurt(self, amount:int, game:Game):
+        ...
+
+    def heal(self, amount:int, game:Game):
+        ...
+
+    def counter(self, target:Mob, game:Game):
+        ...
+
+class Item(Displayable):
+    def __init__(self, name:str, cost:int, health:int, effect:Move, border:str, front_sprite:Surface, cut_sprite:Surface, id_num:int, initpos:Coord=(0,0), large_size:Coord=CARD_DIM, cut_size:Coord=CUT_DIM, back_sprite:Surface=CARDBACK, **kwargs):
         self.name=name
         self.cost=cost
         self.health=health
@@ -211,8 +232,10 @@ class Item():
     def reposition(self, new:Coord):
         ...
 
+    def use(self, target:Card, game:Game):
+        ...
 
-class Player():
+class Player(Displayable):
     def __init__(self, id_num:int, hand_anchor:Coord, field_positions:list[Coord], name:str|None=None):
         self.id_num=id_num
         self.hand_anchor=hand_anchor
@@ -221,43 +244,73 @@ class Player():
 
         self.souls:int=STARTING_SOULS
         self.hand:list[Card]=[]
-        self.field:list[Card|None]=[None,None,None]
+        self.field:list[Mob|None]=[None,None,None]
         self.deck:list[Card]=[]
 
     def display(self, surface:Surface, events:Events, game:Game):
         for card in self.hand:
             card.display(surface, events, game)
         for slot in self.field:
-            if isinstance(slot,Card):
+            if isinstance(slot, Mob):
                 slot.display(surface, events, game)
 
+    def next(self) -> Mob|None:
+        cycler=its.cycle(self.field)
+        count:int=0
+        while count < 4:
+            target=next(cycler)
+            if isinstance(target, Mob):
+                return target
+            count+=1
+        return None
+
 class MoveInfo():
-    ...
+    def __init__(self, type:MoveType, origin:Card|None, target:Card|None, player:Player|None, damage:int=0, block:bool=False, **kwargs):
+        self.type=type
+        self.origin=origin
+        self.target=target
+        self.player=player
+        self.damage=damage
+        self.block=block
+        self.extras=kwargs
 
 class Move():
-    def __init__(self, type:MoveType, condition:list[Condition], effect:Callable[[MoveInfo,Game],None], targets:Callable[[MoveInfo,Game],None]):
+    def __init__(self, type:MoveType, condition:list[Condition], effect:Callable[[MoveInfo,Game],None], targets:Callable[[MoveInfo,Game],None], scope:Scope):
         self.type=type
         self.condition=condition
         self.effect=effect
         self.targets=targets
+        self.scope=scope
 
     def use(self, info:MoveInfo, game:Game):
         return self.effect(info, game)
 
+def gen_change_menu(menu:str):
+    def change_menu(game:Game, menu:str=menu):
+        game.menu=menu
+    return change_menu
+
+class Cards(enum.Enum):
+    ...
+
 title=Element(0.5,165,r"Assets\title.png",x_coord_type=AS_RATIO,image_size=(842,120),str_type=AS_PATH)
 beta_text=Element(0.5,270,"Closed Beta (Rebuild)",font=MJGS_M,colour=ORANGE,x_coord_type=AS_RATIO,str_type=AS_STR)
-start_game_text=Element(0.5,450,"Singleplayer",x_coord_type=AS_RATIO,str_type=AS_STR)
+start_game_text=Element(0.5,450,"Singleplayer",x_coord_type=AS_RATIO,str_type=AS_STR,on_click=gen_change_menu(MenuNames.GAME_MENU))
 host_game_text=Element(7/18,550,"Host Game",x_coord_type=AS_RATIO,font=MJGS_M,str_type=AS_STR)
 join_game_text=Element(11/18,550,"Join Game",x_coord_type=AS_RATIO,font=MJGS_M,str_type=AS_STR)
 to_decks_text=Element(0.5,650,"Decks",str_type=AS_STR,x_coord_type=AS_RATIO)
 
-main_menu=Menu([title,beta_text,host_game_text,join_game_text,start_game_text,to_decks_text],MAIN_MENU)
+v.player1=Player(1,P1_HAND,P1_FIELD,"Player 1")
+v.player2=Player(2,P2_HAND,P2_FIELD,"Player 2")
+
+main_menu=Menu([title,beta_text,host_game_text,join_game_text,start_game_text,to_decks_text],MenuNames.MAIN_MENU)
+game_menu=Menu([v.player1,v.player2],MenuNames.GAME_MENU)
 
 mp=mouse.get_pos()
 dt=0
 debug:bool=True
 while v.running:
-    v.screen.blit(v.background,(0,0))
+    screen.blit(v.background,(0,0))
 
     md=False
     mu=False
@@ -293,14 +346,16 @@ while v.running:
             v.background=transform.scale(v.background,e.size)
     event_suite:Events=Events(md,mu,dmx,dmy,kp_current,km,msx,msy,mp,wx,wy,dt,kp_frame)
 
-    if v.menu == MAIN_MENU:
-        main_menu.display(v.screen,event_suite,v)
+    if v.menu == MenuNames.MAIN_MENU:
+        main_menu.display(screen,event_suite,v)
+    elif v.menu == MenuNames.GAME_MENU:
+        game_menu.display(screen,event_suite,v)
     v.update_anims(event_suite)
 
     if debug:
         mp_text=MJGS_S.render("  "+str(mp),True,BLACK)
-        draw.rect(v.screen,WHITE,mp_text.get_rect(x=mp[0],y=mp[1]))
-        v.screen.blit(mp_text,mp)
+        draw.rect(screen,WHITE,mp_text.get_rect(x=mp[0],y=mp[1]))
+        screen.blit(mp_text,mp)
 
     display.update()
     dt=v.clock.tick(v.FPS)
