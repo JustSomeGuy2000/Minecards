@@ -1,8 +1,6 @@
 from __future__ import annotations
 from MCLib.const import *
 
-type Card=Mob|Item
-
 class Displayable():
     """Classes that have the display() method."""
     def __init__(self):
@@ -155,35 +153,59 @@ class Animation():
         result=self.updater(self,game)
         return result
 
-class Mob(Displayable):
-    def __init__(self, name:str, cost:int, health:int, moves:list[Move], mob_class:str, biome:str, border:str, front_sprite:Surface, cut_sprite:Surface, id_num:int, initpos:Coord=(0,0), large_size:Coord=CARD_DIM, cut_size:Coord=CUT_DIM, back_sprite:Surface=CARDBACK, **kwargs):
+class Card(Displayable):
+    def __init__(self, name:str, cost:int, border:BorderColour, id_num:int, front_sprite:Surface, cut_sprite:Surface, initpos:Coord=(0,0), large_size:Coord=CARD_DIM, cut_size:Coord=CUT_DIM, back_sprite:Surface=CARDBACK):
         self.name=name
         self.cost=cost
-        self.health=health
-        self.moves=moves
-        self.mob_class=mob_class
-        self.biome=biome
         self.border=border
+        self.id_num=id_num
+        self.initpos=initpos
         self.large_size=large_size
         self.cut_size=cut_size
+        self.back_sprite=back_sprite
         self.front_sprite=transform.scale(front_sprite,large_size).convert_alpha()
         self.cut_sprite=transform.scale(cut_sprite,cut_size).convert_alpha()
         self.back_sprite=transform.scale(back_sprite,large_size).convert_alpha()
         self.current_sprite=self.back_sprite
         self.pos=Proportion(initpos[0],initpos[1])
         self.rect=self.current_sprite.get_rect(topleft=initpos)
-        self.id_num=id_num
-        self.initpos=initpos
+
+        self.playable:bool=True
+        self.owned_by:Player|None=None
+        self.visible:bool=False
+        self.selected:bool=False
+        self.targeted:bool=False
+        self.is_my_turn:bool=False
+
+    def __deepcopy__(self, memo) -> Self:
+        cls=self.__class__
+        result=cls.__new__(cls)
+        memo[id(self)]=result
+        for k, v in self.__dict__.items():
+            if isinstance(v, Surface):
+                setattr(result, k, v.copy())
+            elif isinstance(v, (Move, enum.Enum, enum.Flag)):
+                setattr(result, k, copy.copy(v))
+            else:
+                setattr(result, k, copy.deepcopy(v, memo))
+        return result
+
+class Mob(Card):
+    def __init__(self, name:str, cost:int, health:int, moves:list[Move], mob_class:MobClass, biome:Biome, border:BorderColour, front_sprite:Surface, cut_sprite:Surface, id_num:int, initpos:Coord=(0,0), large_size:Coord=CARD_DIM, cut_size:Coord=CUT_DIM, back_sprite:Surface=CARDBACK, **kwargs):
+        super().__init__(name,cost,border,id_num,front_sprite,cut_sprite,initpos,large_size,cut_size,back_sprite)
+        self.health=health
+        self.moves=moves
+        self.mob_class=mob_class
+        self.biome=biome
         self.extras=kwargs
 
         self.items:list[Item]=[]
-        self.playable:bool=True
         self.proxy_for:Mob|None=None
         self.proxy:Mob|None=None
-        self.owned_by:Player|None=None
 
     def display(self, surface:Surface, events:Events, game:Game):
-        surface.blit(self.current_sprite,self.rect)
+        if self.visible:
+            surface.blit(self.current_sprite,self.rect)
 
     def reposition(self, new:Coord):
         ...
@@ -203,31 +225,18 @@ class Mob(Displayable):
     def counter(self, target:Mob, game:Game):
         ...
 
-class Item(Displayable):
-    def __init__(self, name:str, cost:int, health:int, effect:Move, border:str, front_sprite:Surface, cut_sprite:Surface, id_num:int, initpos:Coord=(0,0), large_size:Coord=CARD_DIM, cut_size:Coord=CUT_DIM, back_sprite:Surface=CARDBACK, **kwargs):
-        self.name=name
-        self.cost=cost
-        self.health=health
+class Item(Card):
+    def __init__(self, name:str, cost:int, effect:Move, border:str, front_sprite:Surface, cut_sprite:Surface, id_num:int, uses:int=1, initpos:Coord=(0,0), large_size:Coord=CARD_DIM, cut_size:Coord=CUT_DIM, back_sprite:Surface=CARDBACK, **kwargs):
+        super().__init__(name,cost,border,id_num,front_sprite,cut_sprite,initpos,large_size,cut_size,back_sprite)
+        self.uses=uses
         self.effect=effect
-        self.border=border
-        self.large_size=large_size
-        self.cut_size=cut_size
-        self.front_sprite=transform.scale(front_sprite,large_size).convert_alpha()
-        self.cut_sprite=transform.scale(cut_sprite,cut_size).convert_alpha()
-        self.back_sprite=transform.scale(back_sprite,large_size).convert_alpha()
-        self.current_sprite=self.back_sprite
-        self.pos=Proportion(initpos[0],initpos[1])
-        self.rect=self.current_sprite.get_rect(topleft=initpos)
-        self.id_num=id_num
-        self.initpos=initpos
         self.extras=kwargs
 
-        self.playable:bool=True
-        self.owned_by:Player|None=None
         self.attached_to:Mob|None=None
 
     def display(self, surface:Surface, events:Events, game:Game):
-        surface.blit(self.current_sprite,self.rect)
+        if self.visible:
+            surface.blit(self.current_sprite,self.rect)
 
     def reposition(self, new:Coord):
         ...
@@ -235,8 +244,17 @@ class Item(Displayable):
     def use(self, target:Card, game:Game):
         ...
 
+def build_deck(deckhint:dict[Cards,int], player:Player) -> list[Card]:
+    result:list[Card]=[]
+    for card in deckhint:
+        for i in range(deckhint[card]):
+            copied_card=copy.deepcopy(card.value)
+            copied_card.owned_by=player
+            result.append(copied_card)
+    return result
+
 class Player(Displayable):
-    def __init__(self, id_num:int, hand_anchor:Coord, field_positions:list[Coord], name:str|None=None):
+    def __init__(self, id_num:int, hand_anchor:Coord, field_positions:list[Coord], name:str|None=None, deckhint:dict[Cards,int]={}):
         self.id_num=id_num
         self.hand_anchor=hand_anchor
         self.field_positions=field_positions
@@ -245,7 +263,7 @@ class Player(Displayable):
         self.souls:int=STARTING_SOULS
         self.hand:list[Card]=[]
         self.field:list[Mob|None]=[None,None,None]
-        self.deck:list[Card]=[]
+        self.deck:list[Card]=build_deck(deckhint, self)
 
     def display(self, surface:Surface, events:Events, game:Game):
         for card in self.hand:
@@ -263,6 +281,25 @@ class Player(Displayable):
                 return target
             count+=1
         return None
+    
+    def draw(self, amount:int) -> list[Card]:
+        drew:list[Card]=[]
+        for i in range(amount):
+            try:
+                card=self.deck.pop()
+            except:
+                return drew
+            self.hand.append(card)
+            drew.append(card)
+            card.visible=True
+            if self.id_num == 1:
+                card.current_sprite=card.front_sprite
+        return drew
+    
+    def start_game(self) -> list[Card]:
+        r.shuffle(self.hand)
+        self.draw(STARTING_CARDS)
+        return self.hand
 
 class MoveInfo():
     def __init__(self, type:MoveType, origin:Card|None, target:Card|None, player:Player|None, damage:int=0, block:bool=False, **kwargs):
@@ -275,12 +312,14 @@ class MoveInfo():
         self.extras=kwargs
 
 class Move():
-    def __init__(self, type:MoveType, condition:list[Condition], effect:Callable[[MoveInfo,Game],None], targets:Callable[[MoveInfo,Game],None], scope:Scope):
+    def __init__(self, name:str, type:MoveType, condition:list[Condition], effect:Callable[[MoveInfo,Game],None], targets:Callable[[MoveInfo,Game],None], scope:Scope, cost:int=0):
+        self.name=name
         self.type=type
         self.condition=condition
         self.effect=effect
         self.targets=targets
         self.scope=scope
+        self.cost=cost
 
     def use(self, info:MoveInfo, game:Game):
         return self.effect(info, game)
@@ -290,18 +329,23 @@ def gen_change_menu(menu:str):
         game.menu=menu
     return change_menu
 
+def start_game(game:Game):
+    game.menu=MenuNames.GAME_MENU
+    game.player1.start_game()
+    game.player2.start_game()
+
 class Cards(enum.Enum):
-    ...
+    Zombie=Mob("Zombie",2,4,[],MobClass.UNDEAD,Biome.CAVERN,BorderColour.BLUE,image.load("Sprites\\Zombie.png"),image.load("Cut Sprites\\Zombie.png"),0)
 
 title=Element(0.5,165,r"Assets\title.png",x_coord_type=AS_RATIO,image_size=(842,120),str_type=AS_PATH)
 beta_text=Element(0.5,270,"Closed Beta (Rebuild)",font=MJGS_M,colour=ORANGE,x_coord_type=AS_RATIO,str_type=AS_STR)
-start_game_text=Element(0.5,450,"Singleplayer",x_coord_type=AS_RATIO,str_type=AS_STR,on_click=gen_change_menu(MenuNames.GAME_MENU))
+start_game_text=Element(0.5,450,"Singleplayer",x_coord_type=AS_RATIO,str_type=AS_STR,on_click=start_game)
 host_game_text=Element(7/18,550,"Host Game",x_coord_type=AS_RATIO,font=MJGS_M,str_type=AS_STR)
 join_game_text=Element(11/18,550,"Join Game",x_coord_type=AS_RATIO,font=MJGS_M,str_type=AS_STR)
 to_decks_text=Element(0.5,650,"Decks",str_type=AS_STR,x_coord_type=AS_RATIO)
 
-v.player1=Player(1,P1_HAND,P1_FIELD,"Player 1")
-v.player2=Player(2,P2_HAND,P2_FIELD,"Player 2")
+v.player1=Player(1,P1_HAND,P1_FIELD,"Player 1",deckhint={Cards.Zombie:40})
+v.player2=Player(2,P2_HAND,P2_FIELD,"Player 2",deckhint={Cards.Zombie:40})
 
 main_menu=Menu([title,beta_text,host_game_text,join_game_text,start_game_text,to_decks_text],MenuNames.MAIN_MENU)
 game_menu=Menu([v.player1,v.player2],MenuNames.GAME_MENU)

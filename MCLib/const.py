@@ -1,4 +1,6 @@
 import itertools as its
+import random as r
+import copy
 import enum
 from typing import *
 from pygame import *
@@ -65,18 +67,18 @@ class MoveType(enum.Enum):
     IS_ABILITY="This move is an ability"
     IS_ITEM="This move belongs to an item"
 
-class Condition(enum.Enum):
-    END_OF_CYCLE="When this cycle ends"
-    START_OF_CYCLE="When this cycle starts"
-    END_OF_TURN="After this moves"
-    START_OF_TURN="Before this moves"
-    ON_DEATH="When this dies"
-    ON_HURT="When this loses health"
-    ON_ATTACK="When this attacks"
-    ON_ABILITY="When this uses an ability"
-    ON_PASSIVE="When this uses a passive"
-    WHEN_PLAYED="Activates immediately"
-    ALWAYS="Checked every frame"
+class Condition(enum.Flag):
+    END_OF_CYCLE=enum.auto()
+    START_OF_CYCLE=enum.auto()
+    END_OF_TURN=enum.auto()
+    START_OF_TURN=enum.auto()
+    ON_DEATH=enum.auto()
+    ON_HURT=enum.auto()
+    ON_ATTACK=enum.auto()
+    ON_ABILITY=enum.auto()
+    ON_PASSIVE=enum.auto()
+    WHEN_PLAYED=enum.auto()
+    ALWAYS=enum.auto()
 
 class LScope(enum.Enum):
     FIELD="Triggered by cards on the field"
@@ -95,5 +97,23 @@ class Scope():
         self.player_scope=player_scope
         self.loc_scope=loc_scope
 
+class MobClass(enum.Enum):
+    UNDEAD="Undead"
+    ARTHROPOD="Arthropod"
+    AQUATIC="Aquatic"
+    HUMAN="Human"
+    MISC="Misc"
+
+class Biome(enum.Enum):
+    PLAINS="Plains"
+    CAVERN="Cavern"
+    OCEAN="Ocean"
+    SWAMP="Swamp"
+
+class BorderColour(enum.Enum):
+    BLUE="Blue"
+    PINK="Pink"
+
 #misc game constants
 STARTING_SOULS=20
+STARTING_CARDS=5
