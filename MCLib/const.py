@@ -29,11 +29,13 @@ class MenuNames(enum.Enum):
 MJGS_M=font.Font(r"Assets\mojangles.ttf",40)
 MJGS_S=font.Font(r"Assets\mojangles.ttf",20)
 MJGS_L=font.Font(r"Assets\mojangles.ttf",80)
+TW_CEN=font.Font("Assets\\tw-cen-mt-condensed-extrabold.ttf")
 
 #basic colours
 BLACK=(0,0,0)
 WHITE=(255,255,255)
 ORANGE=(255,180,0)
+SELECT_COLOUR=ORANGE
 
 #Argument interpretation constants for Element
 ALIGN_CENTER="center"
@@ -51,7 +53,11 @@ AS_STR="String is a string to be rendered by the font"
 #card-related constants
 CARD_DIM=(150,225)
 CUT_DIM=(170,170)
+ITEM_DIM=(75,75)
 CARDBACK=image.load("Assets\\Backs\\default.png").convert_alpha()
+SELECT_WIDTH=5
+TURN_BAR_SPACING=20
+TURN_BAR_HEIGHT=15
 
 #layout-related constants
 P1_HAND=(90,680)

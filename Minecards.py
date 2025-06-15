@@ -170,6 +170,7 @@ class Card(Displayable):
         self.pos=Proportion(initpos[0],initpos[1])
         self.rect=self.current_sprite.get_rect(topleft=initpos)
 
+        self.last_win_dim:Coord=(BASE_WIN_X,BASE_WIN_Y)
         self.playable:bool=True
         self.owned_by:Player|None=None
         self.visible:bool=False
@@ -189,6 +190,20 @@ class Card(Displayable):
             else:
                 setattr(result, k, copy.deepcopy(v, memo))
         return result
+    
+    def reposition(self, new:Coord):
+        self.pos=Proportion(new[0],new[1])
+        self.rect.topleft=new
+
+    def switch(self, switch_to:Literal["front","back","cut"]):
+        match switch_to:
+            case "front":
+                self.current_sprite=self.front_sprite
+            case "back":
+                self.current_sprite=self.back_sprite
+            case "cut":
+                self.current_sprite=self.cut_sprite
+        self.rect=self.current_sprite.get_rect()
 
 class Mob(Card):
     def __init__(self, name:str, cost:int, health:int, moves:list[Move], mob_class:MobClass, biome:Biome, border:BorderColour, front_sprite:Surface, cut_sprite:Surface, id_num:int, initpos:Coord=(0,0), large_size:Coord=CARD_DIM, cut_size:Coord=CUT_DIM, back_sprite:Surface=CARDBACK, **kwargs):
@@ -204,11 +219,22 @@ class Mob(Card):
         self.proxy:Mob|None=None
 
     def display(self, surface:Surface, events:Events, game:Game):
+        if self.last_win_dim != (events.wx,events.wy):
+            self.reposition(self.pos.gen_pos(events.wx,events.wy))
+        if events.md:
+            if self.rect.collidepoint(events.mp):
+                self.selected=not self.selected
+            else:
+                self.selected=False
         if self.visible:
             surface.blit(self.current_sprite,self.rect)
-
-    def reposition(self, new:Coord):
-        ...
+        if self.selected:
+            draw.rect(surface,SELECT_COLOUR,self.rect,SELECT_WIDTH)
+        if self.targeted:
+            draw.rect(surface,WHITE,Rect(self.rect.left+0.25*self.rect.width,self.rect.top+0.4*self.rect.height,0.5*self.rect.width,0.2*self.rect.height))
+            draw.rect(surface,WHITE,Rect(self.rect.left+0.4*self.rect.width,self.rect.top+0.25*self.rect.height,0.2*self.rect.width,0.5*self.rect.height))
+        if self.is_my_turn:
+            draw.rect(surface,WHITE,Rect(self.rect.left,self.rect.bottom+TURN_BAR_SPACING,self.rect.width,TURN_BAR_HEIGHT))
 
     def attack(self, move_num:int, game:Game):
         ...
@@ -226,7 +252,7 @@ class Mob(Card):
         ...
 
 class Item(Card):
-    def __init__(self, name:str, cost:int, effect:Move, border:str, front_sprite:Surface, cut_sprite:Surface, id_num:int, uses:int=1, initpos:Coord=(0,0), large_size:Coord=CARD_DIM, cut_size:Coord=CUT_DIM, back_sprite:Surface=CARDBACK, **kwargs):
+    def __init__(self, name:str, cost:int, effect:Move, border:str, front_sprite:Surface, cut_sprite:Surface, id_num:int, uses:int=1, initpos:Coord=(0,0), large_size:Coord=CARD_DIM, cut_size:Coord=ITEM_DIM, back_sprite:Surface=CARDBACK, **kwargs):
         super().__init__(name,cost,border,id_num,front_sprite,cut_sprite,initpos,large_size,cut_size,back_sprite)
         self.uses=uses
         self.effect=effect
@@ -235,11 +261,17 @@ class Item(Card):
         self.attached_to:Mob|None=None
 
     def display(self, surface:Surface, events:Events, game:Game):
+        if self.last_win_dim != (events.wx,events.wy):
+            self.reposition(self.pos.gen_pos(events.wx,events.wy))
+        if events.md:
+            if self.rect.collidepoint(events.mp):
+                self.selected=not self.selected
+            else:
+                self.selected=False
         if self.visible:
             surface.blit(self.current_sprite,self.rect)
-
-    def reposition(self, new:Coord):
-        ...
+        if self.selected:
+            draw.rect(surface,SELECT_COLOUR,self.rect,SELECT_WIDTH)
 
     def use(self, target:Card, game:Game):
         ...
@@ -277,10 +309,31 @@ class Player(Displayable):
         count:int=0
         while count < 4:
             target=next(cycler)
+            if isinstance(target,Mob) and target.is_my_turn:
+                break
+            count += 1
+        count=0
+        while count < 4:
+            target=next(cycler)
             if isinstance(target, Mob):
                 return target
             count+=1
         return None
+    
+    def add_to_hand(self, cards:Card|list[Card]):
+        if isinstance(cards, Card):
+            cards=[cards]
+        for card in cards:
+            card.visible=True
+            if self.id_num == 1:
+                card.switch("front")
+            card.reposition((self.hand_anchor[0]+CARD_DIM[0]*len(self.hand),self.hand_anchor[1]))
+            card.owned_by=self
+            self.hand.append(card)
+
+    def reload_hand(self):
+        for card in self.hand:
+            card.reposition((self.hand_anchor[0]+CARD_DIM[0]*len(self.hand),self.hand_anchor[1]))
     
     def draw(self, amount:int) -> list[Card]:
         drew:list[Card]=[]
@@ -288,12 +341,10 @@ class Player(Displayable):
             try:
                 card=self.deck.pop()
             except:
+                self.add_to_hand(drew)
                 return drew
-            self.hand.append(card)
             drew.append(card)
-            card.visible=True
-            if self.id_num == 1:
-                card.current_sprite=card.front_sprite
+        self.add_to_hand(drew)
         return drew
     
     def start_game(self) -> list[Card]:
