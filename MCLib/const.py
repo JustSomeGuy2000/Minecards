@@ -20,6 +20,18 @@ WIN_DIM=(WIN_W,WIN_H)
 screen=display.set_mode(WIN_DIM,RESIZABLE)
 display.set_caption("Minecards")
 
+class Proportion():
+    def __init__(self,x_pos:int,y_pos:int,abs_x:int=BASE_WIN_X,abs_y:int=BASE_WIN_Y):
+        self.x=int(x_pos)
+        self.y=int(y_pos)
+        self.abs_x=abs_x
+        self.abs_y=abs_y
+        self.ratio_x:float=x_pos/abs_x
+        self.ratio_y:float=y_pos/abs_y
+
+    def gen_pos(self,width:int,height:int) -> Coord:
+        return (int(self.ratio_x*width),int(self.ratio_y*height))
+
 #menu identifiers
 class MenuNames(enum.Enum):
     MAIN_MENU="Main Menu"
@@ -58,14 +70,16 @@ CARDBACK=image.load("Assets\\Backs\\default.png").convert_alpha()
 SELECT_WIDTH=5
 TURN_BAR_SPACING=20
 TURN_BAR_HEIGHT=15
+LARGE_DIM=(CARD_DIM[0]*3, CARD_DIM[1]*3)
 
 #layout-related constants
 P1_HAND=(90,680)
 P2_HAND=(90,-100)
 FIELD_X_SPACING=70
 HAND_TO_FIELD_SPACING=50
-P1_FIELD=[(P1_HAND[0]+CUT_DIM[0]*i+FIELD_X_SPACING*i,P1_HAND[1]-HAND_TO_FIELD_SPACING) for i in range(3)]
-P2_FIELD=[(P2_HAND[0]+CUT_DIM[0]*i+FIELD_X_SPACING*i,P2_HAND[1]+HAND_TO_FIELD_SPACING+CARD_DIM[1]) for i in range(3)]
+P1_FIELD=[(P1_HAND[0]+CUT_DIM[0]*i+FIELD_X_SPACING*i,P1_HAND[1]-HAND_TO_FIELD_SPACING-CUT_DIM[1]) for i in range(3)]
+P2_FIELD=[(P2_HAND[0]+CUT_DIM[0]*i+FIELD_X_SPACING*i,P2_HAND[1]+HAND_TO_FIELD_SPACING+CARD_DIM[1]-CUT_DIM[1]) for i in range(3)]
+LARGE_IMAGE_POS=Proportion(930,10)
 
 class MoveType(enum.Enum):
     IS_ATTACK="This move is an attack"
@@ -123,3 +137,4 @@ class BorderColour(enum.Enum):
 #misc game constants
 STARTING_SOULS=20
 STARTING_CARDS=5
+DEEPCOPY_SURFACES=False
