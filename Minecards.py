@@ -168,15 +168,22 @@ class Slot(Displayable):
         if events.md:
             if self.rect.collidepoint(events.mp):
                 self.selected=not self.selected
+                if isinstance(self.owner.hand_selected, Mob):
+                    self.owner.play_mob(self.owner.hand_selected, self)
             else:
                 self.selected=False
+        if isinstance(self.owner.hand_selected, Mob) and self.contains == None:
+            self.targeted=True
+        else:
+            self.targeted=False
         if isinstance(self.contains, Card):
             self.contains.display(surface, events, game)
         if self.selected:
             draw.rect(surface,SELECT_COLOUR,self.rect,SELECT_WIDTH)
         if self.targeted:
-            draw.rect(surface,WHITE,Rect(self.rect.left+0.25*self.rect.width,self.rect.top+0.4*self.rect.height,0.5*self.rect.width,0.2*self.rect.height))
-            draw.rect(surface,WHITE,Rect(self.rect.left+0.4*self.rect.width,self.rect.top+0.25*self.rect.height,0.2*self.rect.width,0.5*self.rect.height))
+            draw.rect(surface,SELECT_COLOUR,self.rect,SELECT_WIDTH)
+            draw.rect(surface,WHITE,Rect(self.rect.left+0.25*self.rect.width,self.rect.top+0.45*self.rect.height,0.5*self.rect.width,0.1*self.rect.height)) #horizontal bar
+            draw.rect(surface,WHITE,Rect(self.rect.left+0.45*self.rect.width,self.rect.top+0.25*self.rect.height,0.1*self.rect.width,0.5*self.rect.height)) #vertical bar
         if self.is_my_turn:
             draw.rect(surface,WHITE,Rect(self.rect.left,self.rect.bottom+TURN_BAR_SPACING,self.rect.width,TURN_BAR_HEIGHT))
 
@@ -231,13 +238,17 @@ class Card(Displayable):
                 setattr(result, k, copy.deepcopy(v, memo))
         return result
     
-    def display(self, surface:Surface, events:Events, game:Game):
+    def display(self, surface:Surface, events:Events, game:Game) -> bool:
+        '''Returns if the card was clicked or not.'''
+        ret=False
         if self.last_win_dim != (events.wx,events.wy):
             self.realign(events.wd)
             self.last_win_dim=events.wd
-        if events.md:
+        if events.md and self.current_sprite == self.front_sprite:
             if self.rect.collidepoint(events.mp):
                 self.selected=not self.selected
+                if self.selected:
+                    ret=True
             else:
                 self.selected=False
         if self.visible:
@@ -250,9 +261,12 @@ class Card(Displayable):
             if self.targeted:
                 draw.rect(surface,WHITE,Rect(self.rect.left+0.25*self.rect.width,self.rect.top+0.4*self.rect.height,0.5*self.rect.width,0.2*self.rect.height))
                 draw.rect(surface,WHITE,Rect(self.rect.left+0.4*self.rect.width,self.rect.top+0.25*self.rect.height,0.2*self.rect.width,0.5*self.rect.height))
+        return ret
     
-    def reposition(self, new:Coord, win_dim:Coord):
+    def reposition(self, new:Coord, win_dim:Coord=None):
         '''Change the position of this object on the screen.'''
+        if win_dim == None:
+            win_dim=screen.get_rect().size
         self.pos=Proportion(new[0],new[1],win_dim[0],win_dim[1])
         self.rect.topleft=new
 
@@ -283,7 +297,6 @@ class Mob(Card):
         self.items:list[Item]=[]
         self.proxy_for:Mob|None=None
         self.proxy:Mob|None=None
-        self.parent:Slot|None=None
 
     def display(self, surface:Surface, events:Events, game:Game):
         super().display(surface, events, game)
@@ -344,11 +357,15 @@ class Player(Displayable):
         self.hand:list[Card]=[]
         self.field:list[Slot]=[Slot(self, field_positions[0]),Slot(self, field_positions[1]),Slot(self, field_positions[2])]
         self.deck:list[Card]=build_deck(deckhint, self)
+        self.hand_selected:Card|None=None
+        self.field_selected:Slot|None=None
 
     def display(self, surface:Surface, events:Events, game:Game):
         '''Display the hand and field.'''
         for card in self.hand:
-            card.display(surface, events, game)
+           card.display(surface, events, game)
+           if card.selected:
+               self.hand_selected=card
         for slot in self.field:
             slot.display(surface, events, game)
 
@@ -381,15 +398,32 @@ class Player(Displayable):
             card.owned_by=self
             self.hand.append(card)
 
-    def reload_hand(self, win_dim:Coord):
+    def play_mob(self, card:Mob, slot:Slot):
+        '''Play a mob onto the field.'''
+        if not isinstance(card, Mob):
+            warnings.warn("Attempted to play a non-mob card onto a field slot.")
+            return
+        if not card.playable:
+            return
+        if card in self.hand:
+            self.hand.remove(card)
+        card.switch("cut")
+        card.reposition(slot.rect.topleft)
+        slot.contains=card
+        card.parent=slot
+        self.reload_hand(screen.get_rect().size)
+
+    def reload_hand(self, win_dim:Coord=None):
         '''Reload the positions of all the cards in the hand, in case position shenanigans are prone to occuring in a piece of code.'''
+        if win_dim == None:
+            win_dim=screen.get_rect().size
         for card in self.hand:
-            card.reposition((self.hand_anchor[0]+CARD_DIM[0]*len(self.hand),self.hand_anchor[1]),win_dim)
+            card.reposition((self.hand_anchor[0]+CARD_DIM[0]*self.hand.index(card),self.hand_anchor[1]),win_dim)
     
     def draw(self, amount:int, win_dim:Coord) -> list[Card]:
         '''Draw cards from the deck and add them to the end of the hand.'''
         drew:list[Card]=[]
-        for i in range(amount):
+        for _ in range(amount):
             try:
                 card=self.deck.pop()
             except:
