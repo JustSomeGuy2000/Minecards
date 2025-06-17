@@ -37,6 +37,8 @@ class Game():
         self.hold:bool=False
         self.player1:Player|None=None
         self.player2:Player|None=None
+        self.selected_card:Card|None=None
+        self.selected_move:Callable|None=None
 
     def update_anims(self,events:Events):
         holds:list[bool]=[]
@@ -244,10 +246,14 @@ class Card(Displayable):
         if self.last_win_dim != (events.wx,events.wy):
             self.realign(events.wd)
             self.last_win_dim=events.wd
-        if events.md and self.current_sprite == self.front_sprite:
+        if events.md and not self.current_sprite == self.back_sprite:
             if self.rect.collidepoint(events.mp):
                 self.selected=not self.selected
+                if isinstance(self.parent, Slot):
+                    game.selected_card=self
                 if self.selected:
+                    if game.selected_card == self:
+                        game.selected_card=None
                     ret=True
             else:
                 self.selected=False
@@ -403,7 +409,7 @@ class Player(Displayable):
         if not isinstance(card, Mob):
             warnings.warn("Attempted to play a non-mob card onto a field slot.")
             return
-        if not card.playable:
+        if not card.playable or not slot.contains == None:
             return
         if card in self.hand:
             self.hand.remove(card)
@@ -412,6 +418,8 @@ class Player(Displayable):
         slot.contains=card
         card.parent=slot
         self.reload_hand(screen.get_rect().size)
+        if self.hand_selected == card:
+            self.hand_selected=None
 
     def reload_hand(self, win_dim:Coord=None):
         '''Reload the positions of all the cards in the hand, in case position shenanigans are prone to occuring in a piece of code.'''
