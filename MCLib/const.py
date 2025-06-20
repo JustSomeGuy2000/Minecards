@@ -1,6 +1,5 @@
 import itertools as its
 import random as r
-import warnings
 import copy
 import enum
 from typing import *
@@ -20,6 +19,10 @@ WIN_W:int=SCRINFO.current_w
 WIN_DIM=(WIN_W,WIN_H)
 screen=display.set_mode(WIN_DIM,RESIZABLE)
 display.set_caption("Minecards")
+
+def warn(message:str, header:str="[WARNING]: ", colour:str="\033[93m", textcolour:str=None):
+    '''Emit a warning to sys.stdout, i.e. through print(). Comes with customisable header and colours using ANSI escape codes.'''
+    print(f"{colour if isinstance(colour, str) else ""}{header}{"\033[0m" if isinstance(colour, str) else ""}{textcolour if isinstance(textcolour, str) else ""}{message}{"\033[0m" if isinstance(textcolour, str) else ""}")
 
 class Proportion():
     def __init__(self,x_pos:int,y_pos:int,abs_x:int=BASE_WIN_X,abs_y:int=BASE_WIN_Y):

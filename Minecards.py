@@ -27,7 +27,7 @@ class Events():
         self.dt=dt #change in time since last frame
 
 class Game(Displayable):
-    def __init__(self): 
+    def __init__(self):
         self.running:bool=True
         self.background:Surface=transform.scale(image.load(r"Assets\background.png"),WIN_DIM).convert_alpha()
         self.FPS=60
@@ -86,10 +86,7 @@ class Game(Displayable):
 
     def queue_deselect(self, next:None|Card=None):
         '''Deselect the currect card. VERY IMPORTANT to call this instead of deselecting manually because cards deselect when anything other than them is clicked. This MUST happen last because other displayables may do things to the selected card when they are clicked.'''
-        if next == None:
-            self.deselect=None
-        else:
-            self.deselect=next
+        self.deselect=next
 
 v=Game()
     
@@ -448,7 +445,7 @@ class Player(Displayable):
     def play_mob(self, card:Mob, slot:Slot):
         '''Play a mob onto the field.'''
         if not isinstance(card, Mob):
-            warnings.warn("Attempted to play a non-mob card onto a field slot.")
+            warn("Attempted to play a non-mob card onto a field slot.")
             return
         if not card.playable or not slot.contains == None:
             return
