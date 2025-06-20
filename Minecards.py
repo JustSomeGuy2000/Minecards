@@ -26,7 +26,7 @@ class Events():
         self.wd=(wx, wy) #gathered window dimensions
         self.dt=dt #change in time since last frame
 
-class Game():
+class Game(Displayable):
     def __init__(self): 
         self.running:bool=True
         self.background:Surface=transform.scale(image.load(r"Assets\background.png"),WIN_DIM).convert_alpha()
@@ -39,8 +39,10 @@ class Game():
         self.player2:Player|None=None
         self.selected_card:Card|None=None
         self.selected_move:Callable|None=None
+        self.deselect:Literal[False]|Card|None=False
 
     def update_anims(self,events:Events):
+        '''Progress all registered animations.'''
         holds:list[bool]=[]
         remove:list[Animation]=[]
         add:list[Animation]=[]
@@ -61,8 +63,33 @@ class Game():
         else:
             self.hold=False
 
+    def display(self, surface:Surface, events:Events):
+        '''Display everything'''
+        if v.menu == MenuNames.MAIN_MENU:
+            main_menu.display(surface, events, self)
+        elif v.menu == MenuNames.GAME_MENU:
+            game_menu.display(surface, events, self)
+            if isinstance(self.selected_card, Card):
+                self.selected_card.display_large(surface, events, self)
+        self.update_anims(event_suite)
+        if self.deselect != False:
+            if self.deselect == None:
+                self.selected_move=None
+            else:
+                self.selected_move=self.deselect
+            self.selected_card=None
+            self.deselect=False
+
     def publish(self, event:Condition):
+        '''Look in all relevant locations for functions registered to the event and execute all of them.'''
         ...
+
+    def queue_deselect(self, next:None|Card=None):
+        '''Deselect the currect card. VERY IMPORTANT to call this instead of deselecting manually because cards deselect when anything other than them is clicked. This MUST happen last because other displayables may do things to the selected card when they are clicked.'''
+        if next == None:
+            self.deselect=None
+        else:
+            self.deselect=next
 
 v=Game()
     
@@ -170,11 +197,11 @@ class Slot(Displayable):
         if events.md:
             if self.rect.collidepoint(events.mp):
                 self.selected=not self.selected
-                if isinstance(self.owner.hand_selected, Mob):
-                    self.owner.play_mob(self.owner.hand_selected, self)
+                if isinstance(game.selected_card, Mob) and game.selected_card in game.player1.hand:
+                    self.owner.play_mob(game.selected_card, self)
             else:
                 self.selected=False
-        if isinstance(self.owner.hand_selected, Mob) and self.contains == None:
+        if isinstance(game.selected_card, Mob) and game.selected_card in game.player1.hand and self.contains == None:
             self.targeted=True
         else:
             self.targeted=False
@@ -199,7 +226,7 @@ class Slot(Displayable):
         self.rect.topleft=self.pos.gen_pos(win_dim[0],win_dim[1])
 
 class Card(Displayable):
-    def __init__(self, name:str, cost:int, border:BorderColour, id_num:int, front_sprite:Surface, cut_sprite:Surface, initpos:Coord=(0,0), large_size:Coord=CARD_DIM, cut_size:Coord=CUT_DIM, back_sprite:Surface=CARDBACK):
+    def __init__(self, name:str, cost:int, border:BorderColour, id_num:int, front_sprite:Surface, cut_sprite:Surface, initpos:Coord=(0,0), large_size:Coord=CARD_DIM, cut_size:Coord=CUT_DIM, back_sprite:Surface=CARDBACK, move_rects:list[tuple[int, int]]=[]):
         self.name=name
         self.cost=cost
         self.border=border
@@ -215,6 +242,13 @@ class Card(Displayable):
         self.current_sprite=self.back_sprite
         self.pos=Proportion(initpos[0],initpos[1])
         self.rect=self.current_sprite.get_rect(topleft=initpos)
+        self.large_rect=self.large_image.get_rect(topleft=LARGE_IMAGE_POS.gen_pos())
+        if move_rects == []:
+            self.move_rects=[self.large_rect]
+        else:
+            self.move_rects:list[Rect]=[]
+            for rect in move_rects:
+                self.move_rects.append(Rect(LARGE_IMAGE_POS.gen_pos()[0],LARGE_IMAGE_POS.gen_pos()[1]+rect[0],LARGE_DIM[0],rect[1]))
 
         self.parent:Slot|None=None
         self.last_win_dim:Coord=(BASE_WIN_X,BASE_WIN_Y)
@@ -251,22 +285,33 @@ class Card(Displayable):
                 self.selected=not self.selected
                 if isinstance(self.parent, Slot):
                     game.selected_card=self
-                if self.selected:
+                if not self.selected:
                     if game.selected_card == self:
-                        game.selected_card=None
-                    ret=True
+                        game.queue_deselect()
+                else:
+                    game.selected_card=self
+                ret=True
             else:
                 self.selected=False
+                if game.selected_card == self:
+                    game.queue_deselect()
         if self.visible:
             surface.blit(self.current_sprite,self.rect)
-        if self.selected:
-            surface.blit(self.large_image, LARGE_IMAGE_POS.gen_pos(events.wx, events.wy))
         if not isinstance(self.parent, Slot):
             if self.selected:
                 draw.rect(surface,SELECT_COLOUR,self.rect,SELECT_WIDTH)
             if self.targeted:
                 draw.rect(surface,WHITE,Rect(self.rect.left+0.25*self.rect.width,self.rect.top+0.4*self.rect.height,0.5*self.rect.width,0.2*self.rect.height))
                 draw.rect(surface,WHITE,Rect(self.rect.left+0.4*self.rect.width,self.rect.top+0.25*self.rect.height,0.2*self.rect.width,0.5*self.rect.height))
+        return ret
+    
+    def display_large(self, surface:Surface, events:Events, game:Game) -> bool:
+        ret=False
+        surface.blit(self.large_image, LARGE_IMAGE_POS.gen_pos(events.wx, events.wy))
+        for rect in self.move_rects:
+            if rect.collidepoint(events.mp):
+                draw.rect(surface, SELECT_COLOUR, rect, SELECT_WIDTH)
+                ret=True
         return ret
     
     def reposition(self, new:Coord, win_dim:Coord=None):
@@ -363,15 +408,11 @@ class Player(Displayable):
         self.hand:list[Card]=[]
         self.field:list[Slot]=[Slot(self, field_positions[0]),Slot(self, field_positions[1]),Slot(self, field_positions[2])]
         self.deck:list[Card]=build_deck(deckhint, self)
-        self.hand_selected:Card|None=None
-        self.field_selected:Slot|None=None
 
     def display(self, surface:Surface, events:Events, game:Game):
         '''Display the hand and field.'''
         for card in self.hand:
-           card.display(surface, events, game)
-           if card.selected:
-               self.hand_selected=card
+            card.display(surface, events, game)
         for slot in self.field:
             slot.display(surface, events, game)
 
@@ -418,18 +459,16 @@ class Player(Displayable):
         slot.contains=card
         card.parent=slot
         self.reload_hand(screen.get_rect().size)
-        if self.hand_selected == card:
-            self.hand_selected=None
 
     def reload_hand(self, win_dim:Coord=None):
-        '''Reload the positions of all the cards in the hand, in case position shenanigans are prone to occuring in a piece of code.'''
+        '''Reload the positions of all the cards in the hand.'''
         if win_dim == None:
             win_dim=screen.get_rect().size
         for card in self.hand:
             card.reposition((self.hand_anchor[0]+CARD_DIM[0]*self.hand.index(card),self.hand_anchor[1]),win_dim)
     
     def draw(self, amount:int, win_dim:Coord) -> list[Card]:
-        '''Draw cards from the deck and add them to the end of the hand.'''
+        '''Draw cards from the top of the deck and add them to the end of the hand.'''
         drew:list[Card]=[]
         for _ in range(amount):
             try:
@@ -539,11 +578,7 @@ while v.running:
             v.background=transform.scale(v.background,e.size)
     event_suite:Events=Events(md,mu,dmx,dmy,kp_current,km,msx,msy,mp,wx,wy,dt,kp_frame)
 
-    if v.menu == MenuNames.MAIN_MENU:
-        main_menu.display(screen,event_suite,v)
-    elif v.menu == MenuNames.GAME_MENU:
-        game_menu.display(screen,event_suite,v)
-    v.update_anims(event_suite)
+    v.display(screen, event_suite)
 
     if debug:
         mp_text=MJGS_S.render("  "+str(mp),True,BLACK)

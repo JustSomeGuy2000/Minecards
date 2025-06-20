@@ -30,7 +30,11 @@ class Proportion():
         self.ratio_x:float=x_pos/abs_x
         self.ratio_y:float=y_pos/abs_y
 
-    def gen_pos(self,width:int,height:int) -> Coord:
+    def gen_pos(self,width:int|None=None,height:int|None=None) -> Coord:
+        if width == None:
+            width=screen.get_width()
+        if height == None:
+            height=screen.get_height()
         return (int(self.ratio_x*width),int(self.ratio_y*height))
 
 #menu identifiers
