@@ -1,5 +1,7 @@
 from __future__ import annotations
 from MCLib.const import *
+from MCLib.moves import Move
+import MCLib.moves as m
 
 class Displayable():
     """Classes that have the display() method."""
@@ -38,7 +40,8 @@ class Game(Displayable):
         self.player1:Player|None=None
         self.player2:Player|None=None
         self.selected_card:Card|None=None
-        self.selected_move:Callable|None=None
+        self.selected_move:Move|None=None
+        self.choosing_target:bool=False
         self.deselect:Literal[False]|Card|None=False
 
     def update_anims(self,events:Events):
@@ -73,20 +76,23 @@ class Game(Displayable):
                 self.selected_card.display_large(surface, events, self)
         self.update_anims(event_suite)
         if self.deselect != False:
-            if self.deselect == None:
-                self.selected_move=None
-            else:
-                self.selected_move=self.deselect
-            self.selected_card=None
+            self.selected_card=self.deselect
+            self.selected_move=None
             self.deselect=False
 
     def publish(self, event:Condition):
         '''Look in all relevant locations for functions registered to the event and execute all of them.'''
         ...
 
-    def queue_deselect(self, next:None|Card=None):
-        '''Deselect the currect card. VERY IMPORTANT to call this instead of deselecting manually because cards deselect when anything other than them is clicked. This MUST happen last because other displayables may do things to the selected card when they are clicked.'''
-        self.deselect=next
+    def queue_select(self, next:None|Card=None, force:bool=False):
+        '''Deselect the currect card. VERY IMPORTANT to call this instead of deselecting manually because cards deselect when anything other than them is clicked. This MUST happen last because other displayables may do things to the selected card when they are clicked. If force is True, it changes the selected card immediately.'''
+        if force:
+            self.selected_move=None
+            self.selected_card=next
+        else: #if deselect has already been set and next is None, the reselection overrides the deselection.
+            if self.deselect != False and self.deselect != None and next == None:
+                return
+            self.deselect=next
 
 v=Game()
     
@@ -198,7 +204,7 @@ class Slot(Displayable):
                     self.owner.play_mob(game.selected_card, self)
             else:
                 self.selected=False
-        if isinstance(game.selected_card, Mob) and game.selected_card in game.player1.hand and self.contains == None:
+        if self.owner == game.player1 and isinstance(game.selected_card, Mob) and game.selected_card in game.player1.hand and self.contains == None:
             self.targeted=True
         else:
             self.targeted=False
@@ -223,7 +229,8 @@ class Slot(Displayable):
         self.rect.topleft=self.pos.gen_pos(win_dim[0],win_dim[1])
 
 class Card(Displayable):
-    def __init__(self, name:str, cost:int, border:BorderColour, id_num:int, front_sprite:Surface, cut_sprite:Surface, initpos:Coord=(0,0), large_size:Coord=CARD_DIM, cut_size:Coord=CUT_DIM, back_sprite:Surface=CARDBACK, move_rects:list[tuple[int, int]]=[]):
+    def __init__(self, name:str, cost:int, border:BorderColour, id_num:int, front_sprite:Surface, cut_sprite:Surface, moves:list[Move], initpos:Coord=(0,0), large_size:Coord=CARD_DIM, cut_size:Coord=CUT_DIM, back_sprite:Surface=CARDBACK, move_rects:list[tuple[int, int]]=[]):
+        '''Move_rects tuples consist only of the starting y and the height, since starting x and width are standard. If ommited, a single move_rect will be generated according to the Card's large rect.'''
         self.name=name
         self.cost=cost
         self.border=border
@@ -240,12 +247,16 @@ class Card(Displayable):
         self.pos=Proportion(initpos[0],initpos[1])
         self.rect=self.current_sprite.get_rect(topleft=initpos)
         self.large_rect=self.large_image.get_rect(topleft=LARGE_IMAGE_POS.gen_pos())
-        if move_rects == []:
+        self.moves=moves
+        self.move_rects:list[Rect]=[]
+        if move_rects == [] and len(self.moves) > 0:
             self.move_rects=[self.large_rect]
         else:
             self.move_rects:list[Rect]=[]
             for rect in move_rects:
-                self.move_rects.append(Rect(LARGE_IMAGE_POS.gen_pos()[0],LARGE_IMAGE_POS.gen_pos()[1]+rect[0],LARGE_DIM[0],rect[1]))
+                self.move_rects.append(Rect(LARGE_IMAGE_POS.gen_pos()[0]+INFO_BORDER_WIDTH,LARGE_IMAGE_POS.gen_pos()[1]+rect[0],LARGE_DIM[0]-2*INFO_BORDER_WIDTH,rect[1]))
+        if len(self.move_rects) != len(self.moves):
+            warn(f"Moves and move rects for {self.name} do not match. Moves: {len(self.moves)}, move_rects: {len(self.move_rects)}")
 
         self.parent:Slot|None=None
         self.last_win_dim:Coord=(BASE_WIN_X,BASE_WIN_Y)
@@ -274,6 +285,8 @@ class Card(Displayable):
     def display(self, surface:Surface, events:Events, game:Game) -> bool:
         '''Returns if the card was clicked or not.'''
         ret=False
+        if not self.visible:
+            return ret
         if self.last_win_dim != (events.wx,events.wy):
             self.realign(events.wd)
             self.last_win_dim=events.wd
@@ -281,17 +294,17 @@ class Card(Displayable):
             if self.rect.collidepoint(events.mp):
                 self.selected=not self.selected
                 if isinstance(self.parent, Slot):
-                    game.selected_card=self
+                    game.queue_select(self)
                 if not self.selected:
                     if game.selected_card == self:
-                        game.queue_deselect()
+                        game.queue_select()
                 else:
-                    game.selected_card=self
+                    game.queue_select(self)
                 ret=True
             else:
                 self.selected=False
                 if game.selected_card == self:
-                    game.queue_deselect()
+                    game.queue_select()
         if self.visible:
             surface.blit(self.current_sprite,self.rect)
         if not isinstance(self.parent, Slot):
@@ -305,10 +318,21 @@ class Card(Displayable):
     def display_large(self, surface:Surface, events:Events, game:Game) -> bool:
         ret=False
         surface.blit(self.large_image, LARGE_IMAGE_POS.gen_pos(events.wx, events.wy))
-        for rect in self.move_rects:
+        if self.large_rect.collidepoint(events.mp):
+            game.queue_select(self)
+        for i, rect in enumerate(self.move_rects):
             if rect.collidepoint(events.mp):
+                if events.md:
+                    game.choosing_target=not game.choosing_target
                 draw.rect(surface, SELECT_COLOUR, rect, SELECT_WIDTH)
+                game.selected_move=self.moves[i]
                 ret=True
+                break
+        else:
+            game.selected_move=None
+            if self.large_rect.collidepoint(events.mp):
+                game.choosing_target=False
+                game.queue_select()
         return ret
     
     def reposition(self, new:Coord, win_dim:Coord=None):
@@ -334,10 +358,9 @@ class Card(Displayable):
         self.rect=self.current_sprite.get_rect()
 
 class Mob(Card):
-    def __init__(self, name:str, cost:int, health:int, moves:list[Move], mob_class:MobClass, biome:Biome, border:BorderColour, front_sprite:Surface, cut_sprite:Surface, id_num:int, initpos:Coord=(0,0), large_size:Coord=CARD_DIM, cut_size:Coord=CUT_DIM, back_sprite:Surface=CARDBACK, **kwargs):
-        super().__init__(name,cost,border,id_num,front_sprite,cut_sprite,initpos,large_size,cut_size,back_sprite)
+    def __init__(self, name:str, cost:int, health:int, moves:list[Move], move_rects:list[Rect], mob_class:MobClass, biome:Biome, border:BorderColour, front_sprite:Surface, cut_sprite:Surface, id_num:int, initpos:Coord=(0,0), large_size:Coord=CARD_DIM, cut_size:Coord=CUT_DIM, back_sprite:Surface=CARDBACK, **kwargs):
+        super().__init__(name,cost,border,id_num,front_sprite,cut_sprite,moves,initpos,large_size,cut_size,back_sprite, move_rects=move_rects)
         self.health=health
-        self.moves=moves
         self.mob_class=mob_class
         self.biome=biome
         self.extras=kwargs
@@ -370,10 +393,9 @@ class Mob(Card):
         ...
 
 class Item(Card):
-    def __init__(self, name:str, cost:int, effect:Move, border:str, front_sprite:Surface, cut_sprite:Surface, id_num:int, uses:int=1, initpos:Coord=(0,0), large_size:Coord=CARD_DIM, cut_size:Coord=ITEM_DIM, back_sprite:Surface=CARDBACK, **kwargs):
-        super().__init__(name,cost,border,id_num,front_sprite,cut_sprite,initpos,large_size,cut_size,back_sprite)
+    def __init__(self, name:str, cost:int, effect:Move, border:str, front_sprite:Surface, cut_sprite:Surface, id_num:int, uses:int=1, initpos:Coord=(0,0), large_size:Coord=CARD_DIM, cut_size:Coord=ITEM_DIM, back_sprite:Surface=CARDBACK, move_rects:list[Rect]=[], **kwargs):
+        super().__init__(name,cost,border,id_num,front_sprite,cut_sprite,[effect],initpos,large_size,cut_size,back_sprite,move_rects=move_rects)
         self.uses=uses
-        self.effect=effect
         self.extras=kwargs
 
         self.attached_to:Mob|None=None
@@ -496,19 +518,6 @@ class MoveInfo():
         self.block=block
         self.extras=kwargs
 
-class Move():
-    def __init__(self, name:str, type:MoveType, condition:list[Condition], effect:Callable[[MoveInfo,Game],None], targets:Callable[[MoveInfo,Game],None], scope:Scope, cost:int=0):
-        self.name=name
-        self.type=type
-        self.condition=condition
-        self.effect=effect
-        self.targets=targets
-        self.scope=scope
-        self.cost=cost
-
-    def use(self, info:MoveInfo, game:Game):
-        return self.effect(info, game)
-
 def gen_change_menu(menu:str):
     def change_menu(game:Game, menu:str=menu):
         game.menu=menu
@@ -518,9 +527,11 @@ def start_game(game:Game):
     game.menu=MenuNames.GAME_MENU
     game.player1.start_game()
     game.player2.start_game()
+    for i in range(3):
+        game.player2.play_mob(game.player2.hand[i],game.player2.field[i])
 
 class Cards(enum.Enum):
-    Zombie=Mob("Zombie",2,4,[],MobClass.UNDEAD,Biome.CAVERN,BorderColour.BLUE,image.load("Sprites\\Zombie.png"),image.load("Cut Sprites\\Zombie.png"),0)
+    Zombie=Mob("Zombie",2,4,[m.bite],[(420-LARGE_IMAGE_POS.gen_pos()[1],60)],MobClass.UNDEAD,Biome.CAVERN,BorderColour.BLUE,image.load("Sprites\\Zombie.png"),image.load("Cut Sprites\\Zombie.png"),0)
 
 title=Element(0.5,165,r"Assets\title.png",x_coord_type=AS_RATIO,image_size=(842,120),str_type=AS_PATH)
 beta_text=Element(0.5,270,"Closed Beta (Rebuild)",font=MJGS_M,colour=ORANGE,x_coord_type=AS_RATIO,str_type=AS_STR)
