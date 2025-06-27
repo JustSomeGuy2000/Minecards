@@ -41,7 +41,7 @@ class Game(Displayable):
         self.player2:Player|None=None
         self.selected_card:Card|None=None
         self.selected_move:Move|None=None
-        self.choosing_target:bool=False
+        self.targeting:bool=False
         self.deselect:Literal[False]|Card|None=False
 
     def update_anims(self,events:Events):
@@ -75,7 +75,7 @@ class Game(Displayable):
             if isinstance(self.selected_card, Card):
                 self.selected_card.display_large(surface, events, self)
         self.update_anims(event_suite)
-        if self.deselect != False:
+        if self.deselect != False and not self.targeting:
             self.selected_card=self.deselect
             self.selected_move=None
             self.deselect=False
@@ -93,6 +93,58 @@ class Game(Displayable):
             if self.deselect != False and self.deselect != None and next == None:
                 return
             self.deselect=next
+
+    def target(self, targets:list[Card|Slot]=[]):
+        '''Target the cards specified by the currently selected move'''
+        if targets != []:
+            pass
+        elif isinstance(self.selected_move, Move):
+            targets=self.selected_move.targets(self)
+        else:
+            warn("Game.target() was called although no move was selected")
+        for thing in targets:
+            thing.targeted=True
+            if isinstance(thing, Card):
+                if isinstance(thing.parent, Slot):
+                    thing.parent.targeted=True
+            elif isinstance(thing, Slot):
+                if isinstance(thing.contains, Card):
+                    thing.contains.targeted=True
+            else:
+                warn("Attempted to target non-(card or slot) object.")
+
+    def scrub(self, targeted:bool=True, selected:bool=True, field:bool=True, hand:bool=False):
+        '''Remove certain traits from certain cards.'''
+        if targeted and selected:
+            self.scrub(targeted=True, selected=False, field=field, hand=hand)
+            self.scrub(targeted=False, selected=True, field=field, hand=hand)
+            return
+        if targeted:
+            attr="targeted"
+        elif selected:
+            attr="selected"
+
+        if field:
+            for target in self.player1.field+self.player2.field:
+                setattr(target, attr, False)
+                if isinstance(target.contains, Card):
+                    setattr(target.contains, attr, False)
+        if hand:
+            for card in self.player1.hand+self.player2.hand:
+                setattr(card, attr, False)
+
+    def __setattr__(self, name:str, value:object):
+        has:bool=False
+        if hasattr(self, "selected_move"):
+            has=True
+        if has and name == "selected_move":
+            prev=copy.copy(self.selected_move)
+        self.__dict__[name]=value
+        if has and name == "selected_move" and self.selected_move != prev:
+            if self.selected_move:
+                self.target()
+            else:
+                self.scrub(selected=False)
 
 v=Game()
     
@@ -193,6 +245,9 @@ class Slot(Displayable):
         self.is_my_turn:bool=False
         self.last_win_dim:Coord=(BASE_WIN_X, BASE_WIN_Y)
 
+    def __repr__(self):
+        return f"<Slot ({id(self)}) containing {repr(self.contains)}>"
+
     def display(self, surface:Surface, events:Events, game:Game):
         if self.last_win_dim != (events.wx,events.wy):
             self.realign(events.wd)
@@ -204,10 +259,6 @@ class Slot(Displayable):
                     self.owner.play_mob(game.selected_card, self)
             else:
                 self.selected=False
-        if self.owner == game.player1 and isinstance(game.selected_card, Mob) and game.selected_card in game.player1.hand and self.contains == None:
-            self.targeted=True
-        else:
-            self.targeted=False
         if isinstance(self.contains, Card):
             self.contains.display(surface, events, game)
         if self.selected:
@@ -261,10 +312,13 @@ class Card(Displayable):
         self.parent:Slot|None=None
         self.last_win_dim:Coord=(BASE_WIN_X,BASE_WIN_Y)
         self.playable:bool=True
-        self.owned_by:Player|None=None
+        self.owner:Player|None=None
         self.visible:bool=False
         self.selected:bool=False
         self.targeted:bool=False
+
+    def __repr__(self):
+        return f"<{self.__class__.__name__} {self.name} ({id(self)})>"
 
     def __deepcopy__(self, memo) -> Self:
         cls=self.__class__
@@ -293,18 +347,20 @@ class Card(Displayable):
         if events.md and not self.current_sprite == self.back_sprite:
             if self.rect.collidepoint(events.mp):
                 self.selected=not self.selected
-                if isinstance(self.parent, Slot):
-                    game.queue_select(self)
                 if not self.selected:
                     if game.selected_card == self:
                         game.queue_select()
+                        game.scrub()
                 else:
                     game.queue_select(self)
+                    if isinstance(self.owner, Player) and self in self.owner.hand:
+                        game.target(targets=[slot for slot in self.owner.field if slot.contains == None])
                 ret=True
             else:
                 self.selected=False
                 if game.selected_card == self:
                     game.queue_select()
+                    game.scrub()
         if self.visible:
             surface.blit(self.current_sprite,self.rect)
         if not isinstance(self.parent, Slot):
@@ -320,19 +376,30 @@ class Card(Displayable):
         surface.blit(self.large_image, LARGE_IMAGE_POS.gen_pos(events.wx, events.wy))
         if self.large_rect.collidepoint(events.mp):
             game.queue_select(self)
-        for i, rect in enumerate(self.move_rects):
-            if rect.collidepoint(events.mp):
-                if events.md:
-                    game.choosing_target=not game.choosing_target
-                draw.rect(surface, SELECT_COLOUR, rect, SELECT_WIDTH)
-                game.selected_move=self.moves[i]
-                ret=True
-                break
-        else:
-            game.selected_move=None
-            if self.large_rect.collidepoint(events.mp):
-                game.choosing_target=False
-                game.queue_select()
+        if not game.targeting: #behaviour if not targeting
+            for i, rect in enumerate(self.move_rects):
+                if rect.collidepoint(events.mp):
+                    if events.md and self.parent in game.player1.field:
+                        game.targeting=not game.targeting
+                        if game.targeting:
+                            game.selected_move=self.moves[i]
+                        else:
+                            game.selected_move=None
+                    draw.rect(surface, SELECT_COLOUR, rect, SELECT_WIDTH)
+                    ret=True
+                    break
+            else:
+                if not game.targeting and events.md:
+                    game.selected_move=None
+                    game.targeting=False
+                    game.queue_select()
+        elif game.selected_card == self: #behaviour if this is targeting
+            draw.rect(surface, SELECT_COLOUR, self.move_rects[self.moves.index(game.selected_move)], SELECT_WIDTH)
+            if events.md and not self.move_rects[self.moves.index(game.selected_move)].collidepoint(events.mp):
+                game.targeting=False
+                game.selected_move=None
+        elif self.targeted: #behaviour if something else is targeting this
+            ...
         return ret
     
     def reposition(self, new:Coord, win_dim:Coord=None):
@@ -412,7 +479,7 @@ def build_deck(deckhint:dict[Cards,int], player:Player) -> list[Card]:
     for card in deckhint:
         for i in range(deckhint[card]):
             copied_card=copy.deepcopy(card.value)
-            copied_card.owned_by=player
+            copied_card.owner=player
             result.append(copied_card)
     return result
 
@@ -427,6 +494,9 @@ class Player(Displayable):
         self.hand:list[Card]=[]
         self.field:list[Slot]=[Slot(self, field_positions[0]),Slot(self, field_positions[1]),Slot(self, field_positions[2])]
         self.deck:list[Card]=build_deck(deckhint, self)
+    
+    def __repr__(self):
+        return f"<Player {str(self.id_num)}>"
 
     def display(self, surface:Surface, events:Events, game:Game):
         '''Display the hand and field.'''
@@ -461,7 +531,7 @@ class Player(Displayable):
             if self.id_num == 1:
                 card.switch("front")
             card.reposition((self.hand_anchor[0]+CARD_DIM[0]*len(self.hand),self.hand_anchor[1]),win_dim)
-            card.owned_by=self
+            card.owner=self
             self.hand.append(card)
 
     def play_mob(self, card:Mob, slot:Slot):

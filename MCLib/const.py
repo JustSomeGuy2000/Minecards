@@ -33,6 +33,9 @@ class Proportion():
         self.ratio_x:float=x_pos/abs_x
         self.ratio_y:float=y_pos/abs_y
 
+    def __repr__(self):
+        return f"<Proportion ({self.ratio_x},{self.ratio_y}) aka {self.gen_pos()}>"
+
     def gen_pos(self,width:int|None=None,height:int|None=None) -> Coord:
         if width == None:
             width=screen.get_width()

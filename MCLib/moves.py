@@ -5,7 +5,7 @@ if typing.TYPE_CHECKING:
     from Minecards import *
 
 class Move():
-    def __init__(self, name:str, type:MoveType, effect:Callable[[MoveInfo,Game],None], targets:Callable[[MoveInfo,Game],None], scope:Scope=None, cost:int=0, ranged:bool=False, conditions:list[Condition]=[]):
+    def __init__(self, name:str, type:MoveType, effect:Callable[[MoveInfo,Game],None], targets:Callable[[Game],list[Card|Slot]], scope:Scope=None, cost:int=0, ranged:bool=False, conditions:list[Condition]=[]):
         self.name=name
         self.type=type
         self.conditions=conditions
@@ -15,6 +15,9 @@ class Move():
         self.cost=cost
         self.ranged=ranged
 
+    def __repr__(self):
+        return f"<{self.type.name} {self.name} ({id(self)})>"
+
     def use(self, info:MoveInfo, game:Game):
         return self.effect(info, game)
     
@@ -23,7 +26,7 @@ def gen_melee(dmg:int):
         ...
     return punch
 
-def basic_opponents(info:MoveInfo, game:Game):
+def basic_opponents(game:Game):
     return game.player2.field
 
 bite=Move("Bite", MoveType.IS_ATTACK, gen_melee(2), basic_opponents)
